@@ -13,8 +13,10 @@ from data_api.llm_client import (
 def test_call_llm_returns_stdout_on_success(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
-    def fake_run(args, capture_output, text, timeout):
-        assert args == ["claude-executable", "-p", "hello"]
+    def fake_run(args, capture_output, text, encoding, timeout):
+        assert args[0] == "claude-executable"
+        assert args[-2:] == ["-p", "hello"]
+        assert "--system-prompt" in args
         return subprocess.CompletedProcess(args, 0, stdout="response text\n", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -24,7 +26,7 @@ def test_call_llm_returns_stdout_on_success(monkeypatch):
 def test_call_llm_raises_on_nonzero_exit(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
-    def fake_run(args, capture_output, text, timeout):
+    def fake_run(args, capture_output, text, encoding, timeout):
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
 
     monkeypatch.setattr(subprocess, "run", fake_run)

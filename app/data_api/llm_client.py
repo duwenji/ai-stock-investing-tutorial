@@ -10,6 +10,9 @@ class ClaudeCLIError(RuntimeError):
     pass
 
 
+_SYSTEM_PROMPT = "あなたは指示に厳密に従うアシスタントです。指示された出力のみを返してください。"
+
+
 def _resolve_claude_executable() -> str:
     executable = shutil.which("claude")
     if executable is None:
@@ -27,9 +30,10 @@ def check_claude_cli_available() -> None:
 def call_llm(prompt: str, timeout: int = 120) -> str:
     executable = _resolve_claude_executable()
     result = subprocess.run(
-        [executable, "-p", prompt],
+        [executable, "--system-prompt", _SYSTEM_PROMPT, "-p", prompt],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=timeout,
     )
     if result.returncode != 0:
