@@ -62,3 +62,31 @@ def test_fetch_news_returns_title_and_publisher(monkeypatch):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
     news = stock_price_api.fetch_news("7203.T", limit=1)
     assert news == [{"title": "Headline 1", "publisher": "Pub"}]
+
+
+def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
+    call_count = {"n": 0}
+
+    def fake_fetch_fundamentals(ticker_symbol):
+        call_count["n"] += 1
+        return {
+            "ticker": ticker_symbol,
+            "name": ticker_symbol,
+            "trailing_pe": 10.0,
+            "price_to_book": 1.0,
+            "dividend_yield": 0.02,
+            "market_cap": 1,
+        }
+
+    tickers = ["AAA.T", "BBB.T"]
+    df1 = stock_price_api.fetch_universe_fundamentals(
+        tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+    )
+    assert call_count["n"] == 2
+    assert df1["dividend_yield_pct"].tolist() == [2.0, 2.0]
+
+    df2 = stock_price_api.fetch_universe_fundamentals(
+        tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+    )
+    assert call_count["n"] == 2
+    assert df1["ticker"].tolist() == df2["ticker"].tolist()

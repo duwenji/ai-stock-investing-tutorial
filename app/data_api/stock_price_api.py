@@ -1,4 +1,11 @@
+import hashlib
+import json
+from pathlib import Path
+
+import pandas as pd
 import yfinance as yf
+
+from common.cache import read_cache, write_cache
 
 
 def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
@@ -26,3 +33,34 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
         {"title": item.get("title"), "publisher": item.get("publisher")}
         for item in news_items[:limit]
     ]
+
+
+def fetch_universe_fundamentals(
+    tickers: list[str],
+    cache_dir: Path,
+    fetch_fundamentals=fetch_fundamentals,
+) -> pd.DataFrame:
+    cache_key = "universe-" + hashlib.sha256(
+        "-".join(sorted(tickers)).encode("utf-8")
+    ).hexdigest()[:12]
+    cached = read_cache(cache_dir, cache_key)
+    if cached is not None:
+        return pd.DataFrame(json.loads(cached))
+
+    rows = []
+    for ticker_symbol in tickers:
+        data = fetch_fundamentals(ticker_symbol)
+        dividend_yield = data.get("dividend_yield")
+        rows.append(
+            {
+                "ticker": data.get("ticker", ticker_symbol),
+                "name": data.get("name"),
+                "per": data.get("trailing_pe"),
+                "pbr": data.get("price_to_book"),
+                "dividend_yield_pct": dividend_yield * 100 if dividend_yield is not None else None,
+                "market_cap": data.get("market_cap"),
+            }
+        )
+    df = pd.DataFrame(rows)
+    write_cache(cache_dir, cache_key, df.to_json(orient="records", force_ascii=False))
+    return df
