@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -9,9 +10,15 @@ from analysis_agents.technical_agent import analyze_technical
 from common.cache import read_cache, write_cache
 from common.disclaimer import DISCLAIMER_NOTICE
 from data_api.llm_client import call_llm, check_claude_cli_available
-from data_api.stock_price_api import fetch_news, fetch_price_history
+from data_api.stock_price_api import fetch_news, fetch_price_history, fetch_universe_fundamentals
 from portfolio_management.review import generate_portfolio_review
 from portfolio_management.storage import load_holdings, save_holdings
+from prompt_patterns.screening import (
+    apply_filters,
+    build_screening_prompt,
+    generate_screening_comments,
+)
+from screening.universe import UNIVERSE
 
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
@@ -87,4 +94,34 @@ with tab_portfolio:
         st.markdown(report)
 
 with tab_screening:
-    st.info("準備中です。")
+    st.header("銘柄スクリーニング")
+
+    condition_text = st.text_input(
+        "スクリーニング条件を自然言語で入力してください",
+        placeholder="PERが15倍以下で配当利回りが3%以上",
+    )
+
+    if condition_text:
+        prompt = build_screening_prompt(condition_text)
+        raw_filters = call_llm(prompt)
+        filters = None
+        try:
+            filters = json.loads(raw_filters)
+        except json.JSONDecodeError:
+            st.error("条件の解釈に失敗しました。条件を言い換えて再度お試しください。")
+
+        if filters is not None:
+            st.subheader("AIが解釈した条件（適用前に確認してください）")
+            st.json(filters)
+
+            if st.button("この条件で絞り込む"):
+                universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+                result_df = apply_filters(universe_df, filters)
+
+                st.subheader(f"絞り込み結果（{len(result_df)}件）")
+                st.dataframe(result_df)
+
+                comments = generate_screening_comments(result_df, call_llm=call_llm)
+                st.subheader("銘柄ごとのAIコメント")
+                for ticker in result_df["ticker"]:
+                    st.write(f"**{ticker}**: {comments.get(ticker, 'コメント生成失敗')}")
