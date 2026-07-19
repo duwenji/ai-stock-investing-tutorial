@@ -53,6 +53,7 @@ UNIVERSE: list[str] = [
     "6762.T",  # TDK
     "6963.T",  # ローム
     "6702.T",  # 富士通
+    "285A.T",  # キオクシアホールディングス
 ]
 
 UNIVERSE_NAMES: dict[str, str] = {
@@ -110,4 +111,5 @@ UNIVERSE_NAMES: dict[str, str] = {
     "6762.T": "TDK",
     "6963.T": "ローム",
     "6702.T": "富士通",
+    "285A.T": "キオクシアホールディングス",
 }
