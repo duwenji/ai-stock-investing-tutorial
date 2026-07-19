@@ -6,10 +6,11 @@ from prompt_patterns.report_generation import build_report_prompt
 
 
 def build_holding_snapshot(
-    holding: dict, fundamentals: dict, technical: dict, news_sentiment: dict
+    holding: dict, fundamentals: dict, technical: dict, news_sentiment: dict, name: str = None
 ) -> dict:
     return {
         "ticker": holding["ticker"],
+        "name": name,
         "shares": holding["shares"],
         "cost": holding["cost"],
         "per": fundamentals.get("per"),
@@ -27,9 +28,14 @@ def generate_portfolio_review(
     fundamentals_by_ticker: dict[str, dict],
     technicals_by_ticker: dict[str, dict],
     news_sentiment_by_ticker: dict[str, dict],
+    names_by_ticker: dict[str, str] | None = None,
     call_llm=default_call_llm,
 ) -> str:
+    names_by_ticker = names_by_ticker or {}
     composition = analyze_portfolio_composition(holdings, current_prices)
+    for row in composition["holdings"]:
+        row["name"] = names_by_ticker.get(row["ticker"])
+
     risk = assess_risk(price_histories)
     snapshots = [
         build_holding_snapshot(
@@ -37,11 +43,17 @@ def generate_portfolio_review(
             fundamentals_by_ticker.get(holding["ticker"], {}),
             technicals_by_ticker.get(holding["ticker"], {}),
             news_sentiment_by_ticker.get(holding["ticker"], {}),
+            names_by_ticker.get(holding["ticker"]),
         )
         for holding in holdings
     ]
 
-    facts = {"composition": composition, "risk": risk, "holdings": snapshots}
+    facts = {
+        "composition": composition,
+        "risk": risk,
+        "holdings": snapshots,
+        "ticker_names": names_by_ticker,
+    }
     prompt = build_report_prompt(facts)
     commentary = call_llm(prompt)
 

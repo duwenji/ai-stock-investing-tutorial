@@ -10,10 +10,13 @@ def test_build_holding_snapshot_combines_all_sources():
     technical = {"signal": "強気"}
     news_sentiment = {"sentiment": "ポジティブ", "confidence": 0.7}
 
-    snapshot = build_holding_snapshot(holding, fundamentals, technical, news_sentiment)
+    snapshot = build_holding_snapshot(
+        holding, fundamentals, technical, news_sentiment, name="エーエー株式会社"
+    )
 
     assert snapshot == {
         "ticker": "AAA.T",
+        "name": "エーエー株式会社",
         "shares": 100,
         "cost": 1000.0,
         "per": 12.0,
@@ -22,6 +25,12 @@ def test_build_holding_snapshot_combines_all_sources():
         "news_sentiment": "ポジティブ",
         "news_confidence": 0.7,
     }
+
+
+def test_build_holding_snapshot_name_defaults_to_none():
+    holding = {"ticker": "AAA.T", "shares": 100, "cost": 1000.0}
+    snapshot = build_holding_snapshot(holding, {}, {}, {})
+    assert snapshot["name"] is None
 
 
 def test_generate_portfolio_review_includes_disclaimer_and_commentary():
@@ -42,8 +51,35 @@ def test_generate_portfolio_review_includes_disclaimer_and_commentary():
         fundamentals_by_ticker,
         technicals_by_ticker,
         news_sentiment_by_ticker,
+        names_by_ticker={"AAA.T": "エーエー株式会社"},
         call_llm=fake_call_llm,
     )
 
     assert report.count(DISCLAIMER_NOTICE) == 2
     assert "テスト用の考察文です。" in report
+
+
+def test_generate_portfolio_review_passes_names_to_prompt():
+    holdings = [{"ticker": "AAA.T", "shares": 100, "cost": 1000.0}]
+    current_prices = {"AAA.T": 1100.0}
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+    price_histories = {"AAA.T": pd.Series([100, 101, 102, 103, 104], index=dates)}
+
+    captured_prompts = []
+
+    def fake_call_llm(prompt):
+        captured_prompts.append(prompt)
+        return "テスト用の考察文です。"
+
+    generate_portfolio_review(
+        holdings,
+        current_prices,
+        price_histories,
+        {"AAA.T": {}},
+        {"AAA.T": {}},
+        {"AAA.T": {}},
+        names_by_ticker={"AAA.T": "エーエー株式会社"},
+        call_llm=fake_call_llm,
+    )
+
+    assert "エーエー株式会社" in captured_prompts[0]

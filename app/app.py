@@ -157,6 +157,7 @@ with tab_portfolio:
                 fundamentals_by_ticker,
                 technicals_by_ticker,
                 news_sentiment_by_ticker,
+                names_by_ticker=candidate_names,
                 call_llm=call_llm,
             )
             payload = {
