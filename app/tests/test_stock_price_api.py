@@ -23,9 +23,27 @@ class FakeTicker:
     @property
     def news(self):
         return [
-            {"title": "Headline 1", "publisher": "Pub", "link": "https://example.com/1"},
-            {"title": "Headline 2", "publisher": "Pub2", "link": "https://example.com/2"},
+            {
+                "content": {
+                    "title": "Headline 1",
+                    "provider": {"displayName": "Pub"},
+                    "clickThroughUrl": {"url": "https://example.com/1"},
+                }
+            },
+            {
+                "content": {
+                    "title": "Headline 2",
+                    "provider": {"displayName": "Pub2"},
+                    "clickThroughUrl": {"url": "https://example.com/2"},
+                }
+            },
         ]
+
+
+class MissingNewsFieldsTicker(FakeTicker):
+    @property
+    def news(self):
+        return [{"content": {"title": "Headline only"}}]
 
 
 class EmptyInfoTicker(FakeTicker):
@@ -64,6 +82,12 @@ def test_fetch_news_returns_title_publisher_and_link(monkeypatch):
     assert news == [
         {"title": "Headline 1", "publisher": "Pub", "link": "https://example.com/1"}
     ]
+
+
+def test_fetch_news_handles_missing_nested_fields(monkeypatch):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", MissingNewsFieldsTicker)
+    news = stock_price_api.fetch_news("7203.T", limit=1)
+    assert news == [{"title": "Headline only", "publisher": None, "link": None}]
 
 
 def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):

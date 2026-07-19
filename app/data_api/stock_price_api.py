@@ -29,14 +29,19 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
 def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
     ticker = yf.Ticker(ticker_symbol)
     news_items = ticker.news or []
-    return [
-        {
-            "title": item.get("title"),
-            "publisher": item.get("publisher"),
-            "link": item.get("link"),
-        }
-        for item in news_items[:limit]
-    ]
+    result = []
+    for item in news_items[:limit]:
+        content = item.get("content") or {}
+        provider = content.get("provider") or {}
+        link_info = content.get("clickThroughUrl") or content.get("canonicalUrl") or {}
+        result.append(
+            {
+                "title": content.get("title"),
+                "publisher": provider.get("displayName"),
+                "link": link_info.get("url"),
+            }
+        )
+    return result
 
 
 def fetch_universe_fundamentals(
