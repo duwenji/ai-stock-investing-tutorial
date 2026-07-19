@@ -30,7 +30,11 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
     ticker = yf.Ticker(ticker_symbol)
     news_items = ticker.news or []
     return [
-        {"title": item.get("title"), "publisher": item.get("publisher")}
+        {
+            "title": item.get("title"),
+            "publisher": item.get("publisher"),
+            "link": item.get("link"),
+        }
         for item in news_items[:limit]
     ]
 
