@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,9 +12,15 @@ from common.cache import read_cache, write_cache
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm, check_claude_cli_available
-from data_api.stock_price_api import fetch_news, fetch_price_history, fetch_universe_fundamentals
+from data_api.stock_price_api import (
+    fetch_fundamentals,
+    fetch_news,
+    fetch_price_history,
+    fetch_universe_fundamentals,
+)
 from portfolio_management.review import generate_portfolio_review
 from portfolio_management.storage import load_holdings, save_holdings
+from portfolio_management.ticker_names import build_candidate_names
 from prompt_patterns.screening import (
     apply_filters,
     build_screening_prompt,
@@ -24,6 +31,12 @@ from screening.universe import UNIVERSE
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
 CACHE_DIR = DATA_DIR / "cache"
+
+
+@st.cache_data(ttl=60 * 60 * 24)
+def _cached_fetch_fundamentals(ticker: str) -> dict:
+    return fetch_fundamentals(ticker)
+
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
 
@@ -40,24 +53,74 @@ tab_portfolio, tab_screening = st.tabs(["ポートフォリオ", "スクリー�
 with tab_portfolio:
     st.header("保有銘柄ポートフォリオ")
 
+    if "holdings_rows" not in st.session_state:
+        st.session_state["holdings_rows"] = load_holdings(HOLDINGS_PATH) or [
+            {"ticker": "", "shares": 0, "cost": 0.0}
+        ]
+
+    candidate_names = build_candidate_names(
+        st.session_state["holdings_rows"], fetch_fundamentals=_cached_fetch_fundamentals
+    )
+
+    st.subheader("銘柄を検索して追加")
+    search_col, add_col = st.columns([4, 1])
+    with search_col:
+        search_options = [""] + [
+            f"{ticker} {name}" for ticker, name in sorted(candidate_names.items())
+        ]
+        picked = st.selectbox(
+            "銘柄コードまたは銘柄名で検索",
+            search_options,
+            key="ticker_search_box",
+            label_visibility="collapsed",
+        )
+    with add_col:
+        add_clicked = st.button("追加")
+
+    if add_clicked and picked:
+        picked_ticker = picked.split(" ", 1)[0]
+        existing_tickers = {row.get("ticker") for row in st.session_state["holdings_rows"]}
+        if picked_ticker in existing_tickers:
+            st.info(f"{picked_ticker} は既に一覧にあります。")
+        else:
+            st.session_state["holdings_rows"].append(
+                {"ticker": picked_ticker, "shares": 0, "cost": 0.0}
+            )
+
+    display_df = pd.DataFrame(st.session_state["holdings_rows"])
+    display_df["銘柄名"] = display_df["ticker"].map(
+        lambda ticker: candidate_names.get(ticker, "")
+    )
+    display_df = display_df[["ticker", "銘柄名", "shares", "cost"]]
+
+    edited_df = st.data_editor(
+        display_df,
+        num_rows="dynamic",
+        key="holdings_editor",
+        column_config={
+            "銘柄名": st.column_config.TextColumn("銘柄名", disabled=True),
+        },
+    )
+
     holdings = load_holdings(HOLDINGS_PATH)
-    holdings_df = pd.DataFrame(holdings or [{"ticker": "", "shares": 0, "cost": 0.0}])
-    edited_df = st.data_editor(holdings_df, num_rows="dynamic", key="holdings_editor")
 
     if st.button("保有銘柄を保存"):
         new_holdings = [
-            row for row in edited_df.to_dict(orient="records") if row.get("ticker")
+            {"ticker": row["ticker"], "shares": row["shares"], "cost": row["cost"]}
+            for row in edited_df.to_dict(orient="records")
+            if row.get("ticker")
         ]
         save_holdings(HOLDINGS_PATH, new_holdings)
+        st.session_state["holdings_rows"] = new_holdings
         st.success("保存しました。")
         holdings = new_holdings
 
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
 
     if holdings and st.button("レビューを生成"):
-        cache_key = "portfolio-review-" + "-".join(
-            f"{h['ticker']}:{h['shares']}:{h['cost']}" for h in holdings
-        )
+        cache_key = "portfolio-review-" + hashlib.sha256(
+            "-".join(f"{h['ticker']}:{h['shares']}:{h['cost']}" for h in holdings).encode("utf-8")
+        ).hexdigest()[:12]
         cached_report = None if force_regenerate else read_cache(CACHE_DIR, cache_key)
 
         if cached_report is not None:
