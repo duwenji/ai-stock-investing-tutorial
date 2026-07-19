@@ -3,6 +3,7 @@ import operator
 
 import pandas as pd
 
+from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm as default_call_llm
 
 _OPERATORS = {
@@ -59,6 +60,6 @@ def generate_screening_comments(
     prompt = build_comment_prompt(result_df)
     raw = call_llm(prompt)
     try:
-        return json.loads(raw)
+        return json.loads(strip_code_fence(raw))
     except json.JSONDecodeError:
         return {ticker: "コメント生成失敗" for ticker in result_df["ticker"]}

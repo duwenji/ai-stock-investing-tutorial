@@ -83,7 +83,7 @@ def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
         tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
     )
     assert call_count["n"] == 2
-    assert df1["dividend_yield_pct"].tolist() == [2.0, 2.0]
+    assert df1["dividend_yield_pct"].tolist() == [0.02, 0.02]
 
     df2 = stock_price_api.fetch_universe_fundamentals(
         tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals

@@ -50,14 +50,15 @@ def fetch_universe_fundamentals(
     rows = []
     for ticker_symbol in tickers:
         data = fetch_fundamentals(ticker_symbol)
-        dividend_yield = data.get("dividend_yield")
         rows.append(
             {
                 "ticker": data.get("ticker", ticker_symbol),
                 "name": data.get("name"),
                 "per": data.get("trailing_pe"),
                 "pbr": data.get("price_to_book"),
-                "dividend_yield_pct": dividend_yield * 100 if dividend_yield is not None else None,
+                # yfinance's dividendYield is already a percentage number
+                # (e.g. 3.45 means 3.45%), not a fraction to scale up.
+                "dividend_yield_pct": data.get("dividend_yield"),
                 "market_cap": data.get("market_cap"),
             }
         )

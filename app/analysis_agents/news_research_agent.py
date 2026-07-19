@@ -1,5 +1,6 @@
 import json
 
+from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm as default_call_llm
 
 
@@ -23,7 +24,7 @@ def research_news_batch(
     prompt = build_news_sentiment_prompt(news_by_ticker)
     raw = call_llm(prompt)
     try:
-        result = json.loads(raw)
+        result = json.loads(strip_code_fence(raw))
     except json.JSONDecodeError:
         result = {}
 

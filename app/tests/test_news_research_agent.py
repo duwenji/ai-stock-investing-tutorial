@@ -26,3 +26,12 @@ def test_research_news_batch_fallback_on_invalid_json():
     result = research_news_batch(news_by_ticker, call_llm=lambda prompt: "not json")
     assert result["AAA.T"]["sentiment"] is None
     assert result["AAA.T"]["confidence"] is None
+
+
+def test_research_news_batch_strips_code_fence():
+    news_by_ticker = {"AAA.T": [{"title": "好決算", "publisher": "X"}]}
+    fake_call_llm = lambda prompt: (
+        '```json\n{"AAA.T": {"sentiment": "ポジティブ", "confidence": 0.7}}\n```'
+    )
+    result = research_news_batch(news_by_ticker, call_llm=fake_call_llm)
+    assert result["AAA.T"]["sentiment"] == "ポジティブ"

@@ -9,6 +9,7 @@ from analysis_agents.news_research_agent import research_news_batch
 from analysis_agents.technical_agent import analyze_technical
 from common.cache import read_cache, write_cache
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm, check_claude_cli_available
 from data_api.stock_price_api import fetch_news, fetch_price_history, fetch_universe_fundamentals
 from portfolio_management.review import generate_portfolio_review
@@ -106,7 +107,7 @@ with tab_screening:
         raw_filters = call_llm(prompt)
         filters = None
         try:
-            filters = json.loads(raw_filters)
+            filters = json.loads(strip_code_fence(raw_filters))
         except json.JSONDecodeError:
             st.error("条件の解釈に失敗しました。条件を言い換えて再度お試しください。")
 

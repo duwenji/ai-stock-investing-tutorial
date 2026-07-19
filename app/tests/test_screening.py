@@ -49,3 +49,10 @@ def test_generate_screening_comments_fallback_on_invalid_json():
     df = pd.DataFrame([{"ticker": "AAA", "per": 12.0, "dividend_yield_pct": 3.5}])
     result = generate_screening_comments(df, call_llm=lambda prompt: "not json")
     assert result == {"AAA": "コメント生成失敗"}
+
+
+def test_generate_screening_comments_strips_code_fence():
+    df = pd.DataFrame([{"ticker": "AAA", "per": 12.0, "dividend_yield_pct": 3.5}])
+    fake_call_llm = lambda prompt: '```json\n{"AAA": "割安感があります。"}\n```'
+    result = generate_screening_comments(df, call_llm=fake_call_llm)
+    assert result == {"AAA": "割安感があります。"}
