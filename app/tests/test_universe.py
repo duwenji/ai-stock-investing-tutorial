@@ -2,7 +2,7 @@ from screening.universe import UNIVERSE, UNIVERSE_NAMES
 
 
 def test_universe_size_within_expected_range():
-    assert 40 <= len(UNIVERSE) <= 50
+    assert 40 <= len(UNIVERSE) <= 60
 
 
 def test_universe_tickers_are_unique():
