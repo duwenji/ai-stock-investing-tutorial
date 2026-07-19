@@ -121,11 +121,14 @@ with tab_portfolio:
         cache_key = "portfolio-review-" + hashlib.sha256(
             "-".join(f"{h['ticker']}:{h['shares']}:{h['cost']}" for h in holdings).encode("utf-8")
         ).hexdigest()[:12]
-        cached_report = None if force_regenerate else read_cache(CACHE_DIR, cache_key)
+        cached_payload = None if force_regenerate else read_cache(CACHE_DIR, cache_key)
+        try:
+            payload = json.loads(cached_payload) if cached_payload is not None else None
+        except json.JSONDecodeError:
+            # 旧バージョン（レポート本文のみを保存する形式）のキャッシュは無視して再生成する
+            payload = None
 
-        if cached_report is not None:
-            report = cached_report
-        else:
+        if payload is None:
             current_prices = {}
             price_histories = {}
             fundamentals_by_ticker = {}
@@ -153,9 +156,32 @@ with tab_portfolio:
                 news_sentiment_by_ticker,
                 call_llm=call_llm,
             )
-            write_cache(CACHE_DIR, cache_key, report)
+            payload = {
+                "report": report,
+                "news_by_ticker": news_by_ticker,
+                "news_sentiment_by_ticker": news_sentiment_by_ticker,
+            }
+            write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
-        st.markdown(report)
+        st.markdown(payload["report"])
+
+        st.subheader("参照ニュース（センチメント判定の元データ）")
+        for holding in holdings:
+            ticker = holding["ticker"]
+            sentiment_info = payload["news_sentiment_by_ticker"].get(ticker, {})
+            sentiment_label = sentiment_info.get("sentiment") or "不明"
+            news_items = payload["news_by_ticker"].get(ticker, [])
+            with st.expander(f"{ticker} の参照ニュース（センチメント: {sentiment_label}）"):
+                if not news_items:
+                    st.write("ニュースが取得できませんでした。")
+                for item in news_items:
+                    title = item.get("title") or "(タイトルなし)"
+                    publisher = item.get("publisher") or "?"
+                    link = item.get("link")
+                    if link:
+                        st.markdown(f"- [{title}]({link})（{publisher}）")
+                    else:
+                        st.markdown(f"- {title}（{publisher}）")
 
 with tab_screening:
     st.header("銘柄スクリーニング")
