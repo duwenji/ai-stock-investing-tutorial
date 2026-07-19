@@ -1,11 +1,15 @@
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 from common.cache import read_cache, write_cache
+
+_YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
 
 
 def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
@@ -42,6 +46,31 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
             }
         )
     return result
+
+
+def fetch_japanese_name(ticker_symbol: str) -> str | None:
+    """Yahoo!ファイナンス（日本版）のページタイトルから日本語の銘柄名を取得する。
+
+    yfinance（Yahoo Financeのグローバルデータ）は日本株の名前を英語でしか
+    返さないため、日本語名専用にこの関数を使う。
+    """
+    url = f"https://finance.yahoo.co.jp/quote/{ticker_symbol}"
+    try:
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    match = _YAHOO_JP_TITLE_RE.search(response.text)
+    if not match:
+        return None
+
+    title = match.group(1)
+    if "【" not in title:
+        return None
+
+    name = title.split("【", 1)[0].strip()
+    return name or None
 
 
 def fetch_universe_fundamentals(

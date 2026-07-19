@@ -9,16 +9,16 @@ def test_returns_universe_names_when_no_extra_holdings():
 def test_resolves_names_for_holdings_outside_universe():
     holdings = [{"ticker": "AAA.T", "shares": 10, "cost": 100.0}]
 
-    def fake_fetch_fundamentals(ticker):
+    def fake_resolve_name(ticker):
         assert ticker == "AAA.T"
-        return {"name": "Fake Corp"}
+        return "フェイク株式会社"
 
     result = build_candidate_names(
         holdings,
         universe_names={"7203.T": "トヨタ自動車"},
-        fetch_fundamentals=fake_fetch_fundamentals,
+        resolve_name=fake_resolve_name,
     )
-    assert result == {"7203.T": "トヨタ自動車", "AAA.T": "Fake Corp"}
+    assert result == {"7203.T": "トヨタ自動車", "AAA.T": "フェイク株式会社"}
 
 
 def test_excludes_holdings_whose_name_cannot_be_resolved():
@@ -27,7 +27,7 @@ def test_excludes_holdings_whose_name_cannot_be_resolved():
     result = build_candidate_names(
         holdings,
         universe_names={},
-        fetch_fundamentals=lambda ticker: {"name": None},
+        resolve_name=lambda ticker: None,
     )
     assert result == {}
 
@@ -35,12 +35,12 @@ def test_excludes_holdings_whose_name_cannot_be_resolved():
 def test_universe_name_is_not_overwritten_by_holding_lookup():
     holdings = [{"ticker": "7203.T", "shares": 10, "cost": 100.0}]
 
-    def fake_fetch_fundamentals(ticker):
-        raise AssertionError("universe内のティッカーはfetch_fundamentalsを呼ばない")
+    def fake_resolve_name(ticker):
+        raise AssertionError("universe内のティッカーはresolve_nameを呼ばない")
 
     result = build_candidate_names(
         holdings,
         universe_names={"7203.T": "トヨタ自動車"},
-        fetch_fundamentals=fake_fetch_fundamentals,
+        resolve_name=fake_resolve_name,
     )
     assert result == {"7203.T": "トヨタ自動車"}

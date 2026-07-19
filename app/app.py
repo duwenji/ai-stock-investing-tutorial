@@ -13,7 +13,7 @@ from common.disclaimer import DISCLAIMER_NOTICE
 from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm, check_claude_cli_available
 from data_api.stock_price_api import (
-    fetch_fundamentals,
+    fetch_japanese_name,
     fetch_news,
     fetch_price_history,
     fetch_universe_fundamentals,
@@ -34,8 +34,8 @@ CACHE_DIR = DATA_DIR / "cache"
 
 
 @st.cache_data(ttl=60 * 60 * 24)
-def _cached_fetch_fundamentals(ticker: str) -> dict:
-    return fetch_fundamentals(ticker)
+def _cached_fetch_japanese_name(ticker: str) -> str | None:
+    return fetch_japanese_name(ticker)
 
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
@@ -59,7 +59,7 @@ with tab_portfolio:
         ]
 
     candidate_names = build_candidate_names(
-        st.session_state["holdings_rows"], fetch_fundamentals=_cached_fetch_fundamentals
+        st.session_state["holdings_rows"], resolve_name=_cached_fetch_japanese_name
     )
 
     st.subheader("銘柄を検索して追加")

@@ -90,6 +90,47 @@ def test_fetch_news_handles_missing_nested_fields(monkeypatch):
     assert news == [{"title": "Headline only", "publisher": None, "link": None}]
 
 
+class FakeResponse:
+    def __init__(self, text, status_code=200):
+        self.text = text
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise stock_price_api.requests.HTTPError(f"status {self.status_code}")
+
+
+def test_fetch_japanese_name_parses_yahoo_jp_title(monkeypatch):
+    def fake_get(url, headers=None, timeout=None):
+        assert url == "https://finance.yahoo.co.jp/quote/6753.T"
+        return FakeResponse(
+            "<title>シャープ(株)【6753】：株価・株式情報（夜間PTS含む） - Yahoo!ファイナンス</title>"
+        )
+
+    monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
+    assert stock_price_api.fetch_japanese_name("6753.T") == "シャープ(株)"
+
+
+def test_fetch_japanese_name_returns_none_when_title_missing_marker(monkeypatch):
+    monkeypatch.setattr(
+        stock_price_api.requests,
+        "get",
+        lambda url, headers=None, timeout=None: FakeResponse(
+            "<title>ページが見つかりません - Yahoo!ファイナンス</title>"
+        ),
+    )
+    # マーカー「【」を含まないタイトルはティッカーページではないとみなし None を返す
+    assert stock_price_api.fetch_japanese_name("0000.T") is None
+
+
+def test_fetch_japanese_name_returns_none_on_request_failure(monkeypatch):
+    def raise_error(url, headers=None, timeout=None):
+        raise stock_price_api.requests.RequestException("network error")
+
+    monkeypatch.setattr(stock_price_api.requests, "get", raise_error)
+    assert stock_price_api.fetch_japanese_name("6753.T") is None
+
+
 def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
     call_count = {"n": 0}
 
