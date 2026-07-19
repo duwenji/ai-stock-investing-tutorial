@@ -26,7 +26,7 @@ from prompt_patterns.screening import (
     build_screening_prompt,
     generate_screening_comments,
 )
-from screening.universe import UNIVERSE
+from screening.universe import UNIVERSE, UNIVERSE_NAMES
 
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
@@ -98,7 +98,10 @@ with tab_portfolio:
         num_rows="dynamic",
         key="holdings_editor",
         column_config={
+            "ticker": st.column_config.TextColumn("銘柄コード"),
             "銘柄名": st.column_config.TextColumn("銘柄名", disabled=True),
+            "shares": st.column_config.NumberColumn("保有株数"),
+            "cost": st.column_config.NumberColumn("取得単価"),
         },
     )
 
@@ -206,12 +209,28 @@ with tab_screening:
 
             if st.button("この条件で絞り込む"):
                 universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+                universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+                    universe_df["name"]
+                )
                 result_df = apply_filters(universe_df, filters)
 
                 st.subheader(f"絞り込み結果（{len(result_df)}件）")
-                st.dataframe(result_df)
+                st.dataframe(
+                    result_df,
+                    column_config={
+                        "ticker": st.column_config.TextColumn("銘柄コード"),
+                        "name": st.column_config.TextColumn("銘柄名"),
+                        "per": st.column_config.NumberColumn("PER"),
+                        "pbr": st.column_config.NumberColumn("PBR"),
+                        "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
+                        "market_cap": st.column_config.NumberColumn("時価総額"),
+                    },
+                )
 
                 comments = generate_screening_comments(result_df, call_llm=call_llm)
                 st.subheader("銘柄ごとのAIコメント")
-                for ticker in result_df["ticker"]:
-                    st.write(f"**{ticker}**: {comments.get(ticker, 'コメント生成失敗')}")
+                for row in result_df.itertuples():
+                    st.write(
+                        f"**{row.ticker} {row.name}**: "
+                        f"{comments.get(row.ticker, 'コメント生成失敗')}"
+                    )
