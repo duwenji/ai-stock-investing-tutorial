@@ -1,3 +1,7 @@
+"""yfinanceおよびYahoo!ファイナンス（日本版）から株価・ファンダメンタルズ・
+ニュース等の市場データを取得するAPIラッパー群。取得結果のキャッシュ・
+複数銘柄の並行取得もあわせて提供する。"""
+
 import hashlib
 import json
 import re
@@ -10,15 +14,19 @@ import yfinance as yf
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 
+# Yahoo!ファイナンス（日本版）のページタイトルからHTMLをパースせず銘柄名を
+# 抜き出すための簡易正規表現（フルHTMLパーサーを使うほどではないため）
 _YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
 
 
 def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
+    """指定銘柄の株価時系列（OHLCV）をyfinance経由で取得する。"""
     ticker = yf.Ticker(ticker_symbol)
     return ticker.history(period=period)
 
 
 def fetch_fundamentals(ticker_symbol: str) -> dict:
+    """指定銘柄のファンダメンタルズ指標（PER・PBR・配当利回り等）を取得する。"""
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
     return {
@@ -32,10 +40,13 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
 
 
 def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
+    """指定銘柄に関連する最新ニュースを取得し、表示に必要な項目だけに整形する。"""
     ticker = yf.Ticker(ticker_symbol)
     news_items = ticker.news or []
     result = []
     for item in news_items[:limit]:
+        # yfinanceのニュースレスポンスはネストしたcontent/provider構造のため、
+        # 欠損があっても落ちないよう各階層でNone安全に取り出す
         content = item.get("content") or {}
         provider = content.get("provider") or {}
         link_info = content.get("clickThroughUrl") or content.get("canonicalUrl") or {}
@@ -79,6 +90,12 @@ def fetch_universe_fundamentals(
     cache_dir: Path,
     fetch_fundamentals=fetch_fundamentals,
 ) -> pd.DataFrame:
+    """複数銘柄のファンダメンタルズをまとめて取得し、DataFrameとして返す。
+
+    セクター分析などスクリーニング用途で銘柄集合全体を扱うため、
+    キャッシュと並行取得によって繰り返し呼び出しのコストを抑える。
+    """
+    # 銘柄集合ごとに一意なキャッシュキーを作る（順序に依らないようソートしてハッシュ化）
     cache_key = "universe-" + hashlib.sha256(
         "-".join(sorted(tickers)).encode("utf-8")
     ).hexdigest()[:12]
@@ -86,10 +103,12 @@ def fetch_universe_fundamentals(
     if cached is not None:
         return pd.DataFrame(json.loads(cached))
 
+    # 銘柄数が多いと逐次取得は遅いため、複数銘柄を並行してAPI取得する
     results = map_concurrently(tickers, fetch_fundamentals)
     rows = []
     for ticker_symbol in tickers:
         data = results[ticker_symbol]
+        # 個別銘柄の取得失敗（例外）は全体を止めず、その銘柄だけスキップする
         if isinstance(data, Exception):
             continue
         rows.append(

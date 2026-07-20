@@ -1,3 +1,10 @@
+"""日本株を対象としたAI投資リサーチアプリのエントリーポイント（Streamlit）。
+
+ポートフォリオ管理・スクリーニング・バックテスト・一括バックテストランキング・
+セクターローテーション分析の各機能をタブ形式のUIとしてまとめ、
+株価/ファンダメンタルズ/ニュース取得とLLM（Claude）によるコメント生成を組み合わせて提供する。
+"""
+
 import hashlib
 import json
 from pathlib import Path
@@ -41,6 +48,7 @@ from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
 from stock_detail.detail import generate_stock_detail
 
+# 保有銘柄データやAPI取得結果のキャッシュを保存するディレクトリ構成
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
 CACHE_DIR = DATA_DIR / "cache"
@@ -48,26 +56,31 @@ CACHE_DIR = DATA_DIR / "cache"
 
 @st.cache_data(ttl=60 * 60 * 24)
 def _cached_fetch_japanese_name(ticker: str) -> str | None:
+    """銘柄名はほぼ変化しないため、1日単位でキャッシュして外部API呼び出しを抑える。"""
     return fetch_japanese_name(ticker)
 
 
 @st.cache_data(ttl=60 * 30)
 def _cached_fetch_price_history(ticker: str, period: str):
+    """株価履歴は頻繁な再取得が不要なため、30分キャッシュして表示速度と負荷を両立する。"""
     return fetch_price_history(ticker, period=period)
 
 
 @st.cache_data(ttl=60 * 30)
 def _cached_analyze_fundamentals(ticker: str) -> dict:
+    """ファンダメンタルズ分析結果を30分キャッシュし、同一銘柄への重複計算を避ける。"""
     return analyze_fundamentals(ticker)
 
 
 @st.cache_data(ttl=60 * 30)
 def _cached_fetch_news(ticker: str) -> list[dict]:
+    """ニュース取得結果を30分キャッシュし、同一銘柄への重複リクエストを避ける。"""
     return fetch_news(ticker)
 
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
 
+# Claude CLIが利用できない環境ではLLM機能が動作しないため、起動時点でチェックしてアプリを止める
 try:
     check_claude_cli_available()
 except Exception as exc:
@@ -76,6 +89,7 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
+# 5つの主要機能をタブとして構成する
 tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector = st.tabs(
     ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト", "セクターローテーション"]
 )
@@ -83,6 +97,9 @@ tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector = st.tabs(
 
 @st.dialog("銘柄詳細情報", width="large")
 def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
+    """銘柄の株価チャート・ファンダメンタルズ・テクニカル・AIコメント・関連ニュースを
+    1つのモーダルにまとめて表示する。各タブの一覧から銘柄をクリックした際の共通詳細画面として使う。
+    """
     with st.spinner("銘柄情報を取得中..."):
         detail = generate_stock_detail(ticker, name, CACHE_DIR, call_llm=call_llm)
 
@@ -100,11 +117,13 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
                 "volume": price_history["volume"],
             }
         )
+        # 陽線/陰線を色分けするため、始値と終値の大小関係から方向を判定する
         chart_df["direction"] = chart_df.apply(
             lambda row: "up" if row["close"] >= row["open"] else "down", axis=1
         )
         color_scale = alt.Scale(domain=["up", "down"], range=["#26a69a", "#ef5350"])
 
+        # ローソク足チャートをヒゲ（rule）と実体（bar）の2レイヤーで構成する
         base = alt.Chart(chart_df).encode(x=alt.X("date:T", title="日付"))
         wick = base.mark_rule().encode(
             y=alt.Y("low:Q", title="株価", scale=alt.Scale(zero=False)),
@@ -118,6 +137,7 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
         )
         st.altair_chart((wick + body).properties(height=300), width="stretch")
 
+        # 出来高は価格チャートの下に別チャートとして表示する
         volume_chart = (
             alt.Chart(chart_df)
             .mark_bar()
@@ -132,6 +152,7 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     else:
         st.info("株価データを取得できませんでした。")
 
+    # 主要ファンダメンタルズ指標をメトリクスとして横並びに表示する
     fundamentals = detail["fundamentals"]
     col1, col2, col3 = st.columns(3)
     col1.metric("PER", fundamentals.get("per") if fundamentals.get("per") is not None else "―")
@@ -148,6 +169,7 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     st.subheader("AI総合分析コメント")
     st.write(detail["comment"])
 
+    # 分析の根拠となった関連ニュースを一覧表示する
     st.subheader("関連ニュース")
     news_items = detail["news"]
     if not news_items:
@@ -165,6 +187,9 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
 
 
 def _handle_table_selection(state_key: str, event, df: pd.DataFrame) -> None:
+    """データフレーム表の行選択イベントを処理する共通ヘルパー。
+    選択行の変化をセッション状態に記録し、新たに選択された銘柄の詳細ダイアログを開く。
+    """
     current = event.selection.rows[0] if event.selection.rows else None
     if current != st.session_state.get(state_key):
         st.session_state[state_key] = current
@@ -176,6 +201,7 @@ def _handle_table_selection(state_key: str, event, df: pd.DataFrame) -> None:
 with tab_portfolio:
     st.header("保有銘柄ポートフォリオ")
 
+    # 初回表示時は保存済みの保有銘柄をロードし、なければ空行を1つ用意して編集を開始できるようにする
     if "holdings_rows" not in st.session_state:
         st.session_state["holdings_rows"] = load_holdings(HOLDINGS_PATH) or [
             {"ticker": "", "shares": 0, "cost": 0.0}
@@ -185,6 +211,7 @@ with tab_portfolio:
         st.session_state["holdings_rows"], resolve_name=_cached_fetch_japanese_name
     )
 
+    # 銘柄コード/銘柄名で検索し、選択した銘柄を保有一覧に追加するUI
     st.subheader("銘柄を検索して追加")
     search_col, add_col = st.columns([4, 1])
     with search_col:
@@ -200,6 +227,7 @@ with tab_portfolio:
     with add_col:
         add_clicked = st.button("追加")
 
+    # 選択済み銘柄が一覧になければ保有銘柄リストに追加する（重複追加は防止）
     if add_clicked and picked:
         picked_ticker = picked.split(" ", 1)[0]
         existing_tickers = {row.get("ticker") for row in st.session_state["holdings_rows"]}
@@ -210,6 +238,7 @@ with tab_portfolio:
                 {"ticker": picked_ticker, "shares": 0, "cost": 0.0}
             )
 
+    # 表示用に銘柄名列を付加した編集可能テーブルを構築する
     display_df = pd.DataFrame(st.session_state["holdings_rows"])
     display_df["銘柄名"] = display_df["ticker"].map(
         lambda ticker: candidate_names.get(ticker, "")
@@ -230,6 +259,7 @@ with tab_portfolio:
 
     holdings = load_holdings(HOLDINGS_PATH)
 
+    # 編集内容をファイルに保存し、セッション状態と表示中の保有銘柄も最新化する
     if st.button("保有銘柄を保存"):
         new_holdings = [
             {"ticker": row["ticker"], "shares": row["shares"], "cost": row["cost"]}
@@ -241,6 +271,7 @@ with tab_portfolio:
         st.success("保存しました。")
         holdings = new_holdings
 
+    # 保有銘柄ごとに詳細ダイアログを開くためのボタン一覧
     if holdings:
         st.subheader("銘柄詳細を見る")
         for i, holding in enumerate(holdings):
@@ -254,6 +285,8 @@ with tab_portfolio:
 
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
 
+    # ポートフォリオ全体のAIレビューを生成する。コストの高いデータ取得・LLM呼び出しを
+    # 伴うため、保有銘柄構成から作ったキャッシュキーで結果を再利用できるようにする
     if holdings and st.button("レビューを生成"):
         cache_key = "portfolio-review-" + hashlib.sha256(
             "-".join(f"{h['ticker']}:{h['shares']}:{h['cost']}" for h in holdings).encode("utf-8")
@@ -273,16 +306,21 @@ with tab_portfolio:
             news_by_ticker = {}
 
             def _fetch_holding_data(ticker: str):
+                """1銘柄分の株価履歴・ファンダメンタルズ・テクニカル・ニュースをまとめて取得する。
+                並列実行（map_concurrently）から呼び出される単位関数。
+                """
                 history = _cached_fetch_price_history(ticker, "6mo")
                 fundamentals = _cached_analyze_fundamentals(ticker)
                 technical = analyze_technical(history)
                 news = _cached_fetch_news(ticker)
                 return history, fundamentals, technical, news
 
+            # 保有銘柄すべてのデータ取得を並列化し、待ち時間を短縮する
             holding_tickers = [holding["ticker"] for holding in holdings]
             with st.spinner("保有銘柄データを取得中..."):
                 holding_results = map_concurrently(holding_tickers, _fetch_holding_data)
 
+            # 取得に失敗した銘柄（例外）はレビュー対象から除外する
             for ticker in holding_tickers:
                 result = holding_results[ticker]
                 if isinstance(result, Exception):
@@ -295,6 +333,7 @@ with tab_portfolio:
                 technicals_by_ticker[ticker] = technical
                 news_by_ticker[ticker] = news
 
+            # 銘柄ごとのニュースをまとめてLLMに渡し、センチメントを一括判定する
             news_sentiment_by_ticker = research_news_batch(news_by_ticker, call_llm=call_llm)
 
             report = generate_portfolio_review(
@@ -316,6 +355,7 @@ with tab_portfolio:
 
         st.markdown(payload["report"])
 
+        # センチメント判定の根拠となったニュースを銘柄ごとに折りたたみ表示する
         st.subheader("参照ニュース（センチメント判定の元データ）")
         for holding in holdings:
             ticker = holding["ticker"]
@@ -343,6 +383,8 @@ with tab_screening:
     )
 
     if condition_text:
+        # 入力条件が前回から変わった場合のみLLMを呼び出し、自然言語条件を
+        # 構造化フィルタ（JSON）に変換する。変わっていなければ結果をセッションから再利用する
         if st.session_state.get("screening_condition_text") != condition_text:
             prompt = build_screening_prompt(condition_text)
             raw_filters = call_llm(prompt)
@@ -351,6 +393,7 @@ with tab_screening:
                 st.session_state["screening_filters"] = json.loads(strip_code_fence(raw_filters))
                 st.session_state["screening_filters_error"] = False
             except json.JSONDecodeError:
+                # LLMの出力が不正なJSONだった場合はエラーとして扱い、フィルタなしにする
                 st.session_state["screening_filters"] = None
                 st.session_state["screening_filters_error"] = True
 
@@ -359,9 +402,11 @@ with tab_screening:
             st.error("条件の解釈に失敗しました。条件を言い換えて再度お試しください。")
 
         if filters is not None:
+            # 実際に適用する前にAIが解釈した条件をユーザーに確認させる
             st.subheader("AIが解釈した条件（適用前に確認してください）")
             st.json(filters)
 
+            # ユニバース銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
             if st.button("この条件で絞り込む"):
                 universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
                 universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
@@ -377,6 +422,7 @@ with tab_screening:
                     "selection": {"rows": [], "columns": []}
                 }
 
+    # 絞り込み結果があれば、選択可能な一覧表と銘柄ごとのAIコメントを表示する
     if st.session_state.get("screening_result_df") is not None:
         result_df = st.session_state["screening_result_df"]
         comments = st.session_state["screening_comments"]
@@ -409,6 +455,7 @@ with tab_screening:
 with tab_backtest:
     st.header("バックテスト")
 
+    # 単一銘柄・単一戦略に対するバックテスト条件の入力
     backtest_strategy = st.selectbox(
         "戦略", list(STRATEGIES.keys()), key="backtest_strategy"
     )
@@ -430,6 +477,7 @@ with tab_backtest:
         transaction_cost_pct = 0.1 if apply_transaction_cost else 0.0
         history = _cached_fetch_price_history(backtest_ticker, backtest_period)
 
+        # 戦略が要求する最低データ日数を満たさない場合は実行できない旨を伝える
         if history.empty or len(history) < strategy["min_days"]:
             st.error(
                 "株価データが取得できないか、バックテストに必要な日数"
@@ -438,6 +486,7 @@ with tab_backtest:
         else:
             prices = history["Close"]
 
+            # 戦略のプリセットパラメータごとに成績を比較する
             comparison = run_backtest_comparison(
                 prices, strategy["func"], strategy["presets"], transaction_cost_pct
             )
@@ -456,6 +505,7 @@ with tab_backtest:
                 },
             )
 
+            # バックテスト条件（戦略・銘柄・期間・コスト）が同一ならAI解説をキャッシュ再利用する
             cache_key = "backtest-" + hashlib.sha256(
                 f"{backtest_strategy}-{backtest_ticker}-{backtest_period}-{transaction_cost_pct}".encode(
                     "utf-8"
@@ -504,10 +554,12 @@ with tab_ranking:
         strategy = STRATEGIES[ranking_strategy]
         transaction_cost_pct = 0.1 if ranking_apply_cost else 0.0
 
+        # 分析対象はユニバース銘柄と保有銘柄の和集合とする
         holdings = load_holdings(HOLDINGS_PATH)
         holdings_tickers = [h["ticker"] for h in holdings if h.get("ticker")]
         target_tickers = sorted(set(UNIVERSE) | set(holdings_tickers))
 
+        # 戦略・期間・コスト・対象銘柄集合が同一なら結果をキャッシュから再利用する
         cache_key = "universe-backtest-" + hashlib.sha256(
             f"{ranking_strategy}-{ranking_period}-{transaction_cost_pct}-"
             f"{'-'.join(target_tickers)}".encode("utf-8")
@@ -519,11 +571,13 @@ with tab_ranking:
         if payload is None:
             prices_by_ticker = {}
             skipped_tickers = []
+            # 多数の銘柄の株価取得を並列化して待ち時間を短縮する
             with st.spinner(f"株価データを取得中...（{len(target_tickers)}銘柄）"):
                 price_results = map_concurrently(
                     target_tickers,
                     lambda ticker: _cached_fetch_price_history(ticker, ranking_period),
                 )
+            # データ取得に失敗・不足した銘柄はランキング対象から除外し、後で案内する
             for ticker in target_tickers:
                 history = price_results[ticker]
                 if isinstance(history, Exception) or history is None or history.empty:
@@ -535,6 +589,7 @@ with tab_ranking:
                 st.error("バックテスト可能な銘柄がありませんでした。")
                 payload = None
             else:
+                # 標準プリセット（先頭のパラメータ組）で全銘柄を横並び比較しランキング化する
                 standard_label, standard_params = strategy["presets"][0]
                 ranking_rows = run_universe_backtest_ranking(
                     prices_by_ticker,
@@ -553,6 +608,7 @@ with tab_ranking:
                 write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         if payload is not None:
+            # 再実行後もランキング結果を表示し続けられるようセッションに保持する
             st.session_state["ranking_payload"] = payload
             st.session_state["ranking_strategy_label"] = ranking_strategy
             st.session_state["ranking_selected_row"] = None
@@ -630,6 +686,7 @@ with tab_sector:
     )
 
     if st.button("分析を実行"):
+        # 取得期間と対象ユニバースが同一なら分析結果をキャッシュから再利用する
         cache_key = "sector-rotation-" + hashlib.sha256(
             f"{sector_period}-{'-'.join(sorted(UNIVERSE))}".encode("utf-8")
         ).hexdigest()[:12]
@@ -641,11 +698,13 @@ with tab_sector:
         if payload is None:
             skipped_tickers = []
             prices_by_ticker = {}
+            # ユニバース全銘柄の株価取得を並列化して待ち時間を短縮する
             with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
                 price_results = map_concurrently(
                     UNIVERSE,
                     lambda ticker: _cached_fetch_price_history(ticker, sector_period),
                 )
+            # データ取得に失敗・不足した銘柄は分析対象から除外する
             for ticker in UNIVERSE:
                 history = price_results[ticker]
                 if isinstance(history, Exception) or history is None or history.empty:
@@ -657,6 +716,7 @@ with tab_sector:
                 st.error("分析可能な銘柄がありませんでした。")
                 payload = None
             else:
+                # 銘柄別リターンを業種別に集約し、業種間のリード・ラグ相関を算出する
                 sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
                 excluded_sectors = sorted(
                     set(SECTOR_MAP.values()) - set(sector_returns.keys())
@@ -679,6 +739,7 @@ with tab_sector:
         pairs = payload["pairs"]
 
         if pairs:
+            # 相関ペアの一覧から対称な相関行列（ヒートマップ用）を組み立てる
             sectors = sorted(
                 {pair["leading_sector"] for pair in pairs}
                 | {pair["lagging_sector"] for pair in pairs}
@@ -690,6 +751,7 @@ with tab_sector:
                 corr_matrix.loc[a, b] = value
                 corr_matrix.loc[b, a] = value
 
+            # Altairのheatmapはlong形式を要求するため、行列をmeltして変換する
             heatmap_df = (
                 corr_matrix.reset_index()
                 .melt(id_vars="index", var_name="sector_b", value_name="correlation")

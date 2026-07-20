@@ -1,3 +1,7 @@
+"""複数のテクニカル戦略（MA・RSI・MACD・ボリンジャーバンド）を対象に、
+過去の株価系列でベクトル化バックテストを実行し、成績指標やLLMによる
+解説文を生成するモジュール。"""
+
 import pandas as pd
 
 from common.disclaimer import DISCLAIMER_NOTICE
@@ -6,22 +10,28 @@ from prompt_patterns.backtest_explanation import build_backtest_prompt
 
 
 def _finalize_backtest(prices: pd.Series, position: pd.Series, transaction_cost_pct: float) -> dict:
+    """ポジション系列（0/1）から損益・勝率・最大ドローダウン等の
+    共通の成績指標を算出する。各戦略関数から共通利用される集計処理。"""
     daily_return = prices.pct_change().fillna(0)
     strategy_return = position * daily_return
 
     if transaction_cost_pct:
+        # ポジションが変化した日（売買が発生した日）にのみ取引コストを差し引く。
         position_changed = position.diff().fillna(0) != 0
         cost = transaction_cost_pct / 100
         strategy_return = strategy_return - position_changed.astype(int) * cost
 
     benchmark_return = daily_return  # Buy & Hold
 
+    # 日次リターンを複利で累積し、戦略とベンチマークの累積収益率を求める。
     cum_strategy = (1 + strategy_return).cumprod() - 1
     cum_benchmark = (1 + benchmark_return).cumprod() - 1
 
+    # ポジションを保有していた日のみを対象に勝率を計算する。
     trade_days = position[position != 0].index
     win_rate = (strategy_return.loc[trade_days] > 0).mean() if len(trade_days) else 0.0
 
+    # 累積収益の直近ピークからの下落率（ドローダウン）の最大値を求める。
     running_max = (1 + cum_strategy).cummax()
     drawdown = (1 + cum_strategy) / running_max - 1
     max_drawdown = drawdown.min()
@@ -61,6 +71,7 @@ def run_rsi_reversal_backtest(
     transaction_cost_pct: float = 0.0,
 ) -> dict:
     """RSI逆張り戦略をベクトル化してバックテストする。"""
+    # 値上がり幅と値下がり幅を分離し、それぞれの移動平均比からRSIを算出する。
     delta = prices.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -74,6 +85,8 @@ def run_rsi_reversal_backtest(
     entry = (rsi.shift(1) < oversold) & (rsi >= oversold)
     exit_signal = rsi >= overbought
 
+    # エントリー/エグジットのシグナルが立った日以降、次のシグナルが
+    # 出るまでポジションを保持し続けるために前方補完（ffill）する。
     raw_position = pd.Series(index=prices.index, dtype=float)
     raw_position[entry] = 1.0
     raw_position[exit_signal] = 0.0
@@ -123,6 +136,8 @@ def run_bollinger_reversal_backtest(
     entry = prices < lower_band
     exit_signal = prices >= middle_band
 
+    # エントリー/エグジットのシグナルが立った日以降、次のシグナルが
+    # 出るまでポジションを保持し続けるために前方補完（ffill）する。
     raw_position = pd.Series(index=prices.index, dtype=float)
     raw_position[entry] = 1.0
     raw_position[exit_signal] = 0.0
@@ -135,6 +150,8 @@ def run_bollinger_reversal_backtest(
     return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
+# 画面（UI）に表示する戦略の一覧。各戦略の実行関数・プリセットパラメータ・
+# バックテストに最低限必要な日数（min_days）を紐付けて管理する。
 STRATEGIES: dict[str, dict] = {
     "移動平均クロスオーバー": {
         "func": run_ma_crossover_backtest,
@@ -177,6 +194,8 @@ def run_backtest_comparison(
     presets: list[tuple[str, dict]],
     transaction_cost_pct: float = 0.0,
 ) -> dict[str, dict]:
+    """同一戦略の複数プリセット（パラメータ設定）でバックテストを実行し、
+    プリセット名ごとの成績を比較できる形でまとめる。"""
     return {
         label: backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **params)
         for label, params in presets
@@ -192,6 +211,8 @@ def generate_backtest_explanation(
     transaction_cost_pct: float = 0.0,
     call_llm=default_call_llm,
 ) -> str:
+    """バックテスト結果をLLMに渡し、投資家向けの解説レポート（Markdown）を
+    生成する。免責事項を先頭と末尾に必ず付与する。"""
     if presets is None:
         presets = STRATEGIES[strategy_name]["presets"]
 
@@ -220,12 +241,16 @@ def run_universe_backtest_ranking(
     transaction_cost_pct: float = 0.0,
     min_days: int = 0,
 ) -> list[dict]:
+    """銘柄ユニバース全体に同一戦略・同一パラメータでバックテストを行い、
+    リスク調整後リターン（収益率÷最大ドローダウン）でランキングする。"""
     rows = []
     for ticker, prices in prices_by_ticker.items():
+        # データ期間が短すぎる銘柄は戦略が機能しないため除外する。
         if len(prices) < min_days:
             continue
         result = backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **preset_params)
         drawdown = abs(result["max_drawdown_pct"])
+        # ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま指標とする。
         risk_adjusted_return = (
             result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
         )

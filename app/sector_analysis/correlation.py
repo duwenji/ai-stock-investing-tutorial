@@ -1,3 +1,10 @@
+"""業種（セクター）単位の値動きを分析するためのモジュール。
+
+個別銘柄の株価から業種ごとの日次リターンを合成し、業種間の
+先行・遅行関係（どの業種が他の業種の値動きを先取りしているか）を
+時差相関によって推定する。
+"""
+
 import pandas as pd
 
 
@@ -10,6 +17,7 @@ def compute_sector_returns(
     prices_by_tickerに存在しない銘柄はスキップする。構成銘柄が0件になった
     業種はキーごと結果から除外する。
     """
+    # 業種ごとに構成銘柄のリターン系列をまとめる
     returns_by_sector: dict[str, list[pd.Series]] = {}
     for ticker, sector in sector_map.items():
         prices = prices_by_ticker.get(ticker)
@@ -17,6 +25,7 @@ def compute_sector_returns(
             continue
         returns_by_sector.setdefault(sector, []).append(prices.pct_change())
 
+    # 業種内の各銘柄リターンを日次で等ウエイト平均し、業種代表リターンを算出
     sector_returns: dict[str, pd.Series] = {}
     for sector, series_list in returns_by_sector.items():
         combined = pd.concat(series_list, axis=1)
@@ -43,6 +52,8 @@ def compute_lead_lag_pairs(
             sector_x, sector_y = sectors[i], sectors[j]
             x, y = sector_returns[sector_x], sector_returns[sector_y]
 
+            # -max_lag_days〜+max_lag_daysの範囲でラグをずらしながら相関係数を
+            # 総当たりで計算し、絶対値が最大となるラグ・相関を採用する
             best_lag = None
             best_corr = None
             for lag in range(-max_lag_days, max_lag_days + 1):
@@ -59,6 +70,8 @@ def compute_lead_lag_pairs(
             if best_lag is None:
                 continue
 
+            # ラグの符号から先行・遅行のどちらの業種かを判定する
+            # （lag=0の場合は先行関係なしとみなし、名前順で決定的に並べる）
             if best_lag > 0:
                 leading, lagging, lag_days = sector_y, sector_x, best_lag
             elif best_lag < 0:

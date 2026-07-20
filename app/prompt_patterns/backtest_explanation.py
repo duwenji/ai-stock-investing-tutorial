@@ -1,3 +1,5 @@
+# バックテスト結果をLLMに解説させるためのプロンプトを組み立てるモジュール。
+# 数値計算はすべてPython側で完了させ、LLMには「結果の解釈・説明」のみを担わせる。
 import json
 
 from common.disclaimer import DISCLAIMER_NOTICE
@@ -8,6 +10,7 @@ from data_api.llm_client import call_llm as default_call_llm
 def build_backtest_prompt(
     ticker: str, comparison: dict[str, dict], strategy_name: str = "移動平均クロスオーバー"
 ) -> str:
+    # 再計算を防ぐため、Python側で算出済みのバックテスト結果をJSONとしてそのまま埋め込む。
     comparison_json = json.dumps(comparison, ensure_ascii=False, indent=2, default=str)
     return (
         f"以下は{strategy_name}戦略のバックテスト結果です"
@@ -23,6 +26,7 @@ def build_backtest_prompt(
         "4. パラメータ組同士の結果を比較し、大きく異なっている場合は"
         "パラメータ選択に対する過学習リスクを強調すること\n"
         "5. 追加で確認する価値がある指標やシナリオの提案（実行はしない）\n\n"
+        # 投資助言と誤解されないよう、指示的な表現を明示的に禁止する。
         "出力は事実の説明と教育的な提案にとどめ、「買うべき」「このルールで"
         "今すぐ売買すべき」のような指示的な表現は使わないでください。\n\n"
         f"{DISCLAIMER_NOTICE}"
@@ -30,6 +34,8 @@ def build_backtest_prompt(
 
 
 def build_ranking_comment_prompt(ranking_rows: list[dict]) -> str:
+    # LLMに渡す情報を必要最小限（ティッカー・リターン・リスク調整後リターン）に絞り、
+    # 余計な情報でコメントの精度が落ちたりトークンを浪費したりしないようにする。
     rows = [
         {
             "ticker": row["ticker"],
@@ -43,6 +49,7 @@ def build_ranking_comment_prompt(ranking_rows: list[dict]) -> str:
         "以下は複数銘柄のバックテスト結果ランキング（リスク調整済みリターン降順）です。"
         "銘柄ごとに投資家向けの一言コメントを日本語で1文ずつ作成してください。"
         "断定的な売買判断は含めないでください。\n"
+        # 後続処理でパースしやすいよう、JSON形式のみを厳密に指定する。
         '出力形式: {"<ticker>": "<コメント>"} というJSONのみを出力してください。\n\n'
         f"{rows_json}"
     )
@@ -59,4 +66,6 @@ def generate_ranking_comments(
     try:
         return json.loads(strip_code_fence(raw))
     except json.JSONDecodeError:
+        # LLMの応答が壊れたJSONだった場合でも処理を止めず、
+        # 銘柄ごとに失敗を示すプレースホルダーで代替する。
         return {row["ticker"]: "コメント生成失敗" for row in ranking_rows}

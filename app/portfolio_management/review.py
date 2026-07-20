@@ -1,3 +1,7 @@
+"""保有ポートフォリオの構成・リスク・個別銘柄情報（ファンダメンタルズ、
+テクニカル、ニュースセンチメント）を集約し、LLMによる統合レビュー
+レポートを生成するモジュール。"""
+
 from common.disclaimer import DISCLAIMER_NOTICE
 from data_api.llm_client import call_llm as default_call_llm
 from portfolio_management.composition import analyze_portfolio_composition
@@ -8,6 +12,9 @@ from prompt_patterns.report_generation import build_report_prompt
 def build_holding_snapshot(
     holding: dict, fundamentals: dict, technical: dict, news_sentiment: dict, name: str = None
 ) -> dict:
+    """1銘柄分のレビュー用スナップショットを組み立てる。LLMへの入力材料
+    となる、保有情報・ファンダメンタルズ・テクニカル・ニュースの要点のみを
+    抜き出して1つの辞書にまとめる。"""
     return {
         "ticker": holding["ticker"],
         "name": name,
@@ -31,8 +38,12 @@ def generate_portfolio_review(
     names_by_ticker: dict[str, str] | None = None,
     call_llm=default_call_llm,
 ) -> str:
+    """ポートフォリオの構成・リスク・銘柄別情報を集約したファクトを
+    LLMに渡し、統合レビューレポート（Markdown）を生成する。
+    免責事項を先頭と末尾に必ず付与する。"""
     names_by_ticker = names_by_ticker or {}
     composition = analyze_portfolio_composition(holdings, current_prices)
+    # 各保有銘柄の構成情報に銘柄名を補完する。
     for row in composition["holdings"]:
         row["name"] = names_by_ticker.get(row["ticker"])
 
@@ -48,6 +59,7 @@ def generate_portfolio_review(
         for holding in holdings
     ]
 
+    # LLMに渡す「事実（facts）」として、構成・リスク・銘柄詳細を1つにまとめる。
     facts = {
         "composition": composition,
         "risk": risk,
