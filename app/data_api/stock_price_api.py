@@ -8,6 +8,7 @@ import requests
 import yfinance as yf
 
 from common.cache import read_cache, write_cache
+from common.concurrency import map_concurrently
 
 _YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
 
@@ -85,9 +86,12 @@ def fetch_universe_fundamentals(
     if cached is not None:
         return pd.DataFrame(json.loads(cached))
 
+    results = map_concurrently(tickers, fetch_fundamentals)
     rows = []
     for ticker_symbol in tickers:
-        data = fetch_fundamentals(ticker_symbol)
+        data = results[ticker_symbol]
+        if isinstance(data, Exception):
+            continue
         rows.append(
             {
                 "ticker": data.get("ticker", ticker_symbol),
