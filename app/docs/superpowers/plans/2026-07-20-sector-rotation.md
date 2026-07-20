@@ -28,7 +28,7 @@
 - Consumes: `screening.universe.UNIVERSE`（既存）
 - Produces: `SECTOR_MAP: dict[str, str]`（228件、キーは`UNIVERSE`と同一のティッカー、値は17業種区分名の日本語文字列）。後続タスクはこのシンボルを`sector_analysis.correlation.compute_sector_returns`の第2引数として利用する。
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `tests/test_sectors.py` を新規作成する:
 
@@ -55,12 +55,12 @@ def test_sector_map_covers_all_seventeen_sectors():
     assert set(SECTOR_MAP.values()) == expected_sectors
 ```
 
-- [ ] **Step 2: テストを実行し、失敗することを確認する**
+- [x] **Step 2: テストを実行し、失敗することを確認する**
 
 Run: `cd app && uv run pytest tests/test_sectors.py -v`
 Expected: `ModuleNotFoundError: No module named 'screening.sectors'` でFAIL
 
-- [ ] **Step 3: `screening/sectors.py`を作成する**
+- [x] **Step 3: `screening/sectors.py`を作成する**
 
 ```python
 # SECTOR_MAPはUNIVERSE（screening/universe.py）の全銘柄を17業種区分（東証）に
@@ -300,12 +300,12 @@ SECTOR_MAP: dict[str, str] = {
 }
 ```
 
-- [ ] **Step 4: テストを実行し、パスすることを確認する**
+- [x] **Step 4: テストを実行し、パスすることを確認する**
 
 Run: `cd app && uv run pytest tests/test_sectors.py -v`
 Expected: 3件PASS
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 cd app
@@ -329,11 +329,11 @@ git commit -m "feat: UNIVERSE銘柄を17業種区分に分類するSECTOR_MAPを
   - `compute_lead_lag_pairs(sector_returns, max_lag_days=20) -> list[dict]`（各要素は`{"leading_sector": str, "lagging_sector": str, "lag_days": int, "correlation": float}`、相関係数の絶対値降順にソート済み）
   - 後続タスク（`app.py`のUI、`prompt_patterns/sector_rotation.py`）はこの2関数と戻り値の形をそのまま利用する。
 
-- [ ] **Step 1: `sector_analysis/__init__.py`を作成する**
+- [x] **Step 1: `sector_analysis/__init__.py`を作成する**
 
 空ファイルとして作成する（内容なし）。
 
-- [ ] **Step 2: 失敗するテストを書く**
+- [x] **Step 2: 失敗するテストを書く**
 
 `tests/test_sector_correlation.py` を新規作成する:
 
@@ -429,12 +429,12 @@ def test_compute_lead_lag_pairs_sorts_by_absolute_correlation_descending():
         assert abs(earlier["correlation"]) >= abs(later["correlation"])
 ```
 
-- [ ] **Step 3: テストを実行し、失敗することを確認する**
+- [x] **Step 3: テストを実行し、失敗することを確認する**
 
 Run: `cd app && uv run pytest tests/test_sector_correlation.py -v`
 Expected: `ModuleNotFoundError: No module named 'sector_analysis'` でFAIL
 
-- [ ] **Step 4: `sector_analysis/correlation.py`を実装する**
+- [x] **Step 4: `sector_analysis/correlation.py`を実装する**
 
 ```python
 import pandas as pd
@@ -518,12 +518,12 @@ def compute_lead_lag_pairs(
     return pairs
 ```
 
-- [ ] **Step 5: テストを実行し、パスすることを確認する**
+- [x] **Step 5: テストを実行し、パスすることを確認する**
 
 Run: `cd app && uv run pytest tests/test_sector_correlation.py -v`
 Expected: 6件PASS
 
-- [ ] **Step 6: コミット**
+- [x] **Step 6: コミット**
 
 ```bash
 cd app
@@ -545,7 +545,7 @@ git commit -m "feat: 業種別リターン算出とリード・ラグ相関計�
   - `build_sector_rotation_prompt(top_pairs: list[dict]) -> str`
   - `generate_sector_rotation_comments(top_pairs: list[dict], call_llm=default_call_llm) -> dict[str, str]`（キーは`f"{leading_sector}->{lagging_sector}"`形式の文字列）。後続タスク（`app.py`）はこの関数をそのまま利用する。
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `tests/test_sector_rotation_prompt.py` を新規作成する:
 
@@ -611,12 +611,12 @@ def test_generate_sector_rotation_comments_falls_back_on_invalid_json():
     assert result == {"電機・精密->機械": "コメント生成失敗"}
 ```
 
-- [ ] **Step 2: テストを実行し、失敗することを確認する**
+- [x] **Step 2: テストを実行し、失敗することを確認する**
 
 Run: `cd app && uv run pytest tests/test_sector_rotation_prompt.py -v`
 Expected: `ModuleNotFoundError: No module named 'prompt_patterns.sector_rotation'` でFAIL
 
-- [ ] **Step 3: `prompt_patterns/sector_rotation.py`を実装する**
+- [x] **Step 3: `prompt_patterns/sector_rotation.py`を実装する**
 
 ```python
 import json
@@ -662,12 +662,12 @@ def generate_sector_rotation_comments(
         }
 ```
 
-- [ ] **Step 4: テストを実行し、パスすることを確認する**
+- [x] **Step 4: テストを実行し、パスすることを確認する**
 
 Run: `cd app && uv run pytest tests/test_sector_rotation_prompt.py -v`
 Expected: 4件PASS
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 cd app
@@ -688,7 +688,7 @@ git commit -m "feat: セクターローテーションのAIコメント生成プ
 
 このタスクはUI配線のみのため、既存方針（`app.py`はロジックを持たせず薄い呼び出しに留め、自動テスト対象外・手動確認）に従いTDDステップは適用しない。Task 5で手動確認する。
 
-- [ ] **Step 1: importを追加する**
+- [x] **Step 1: importを追加する**
 
 `app.py`冒頭のimport群に以下を追加する（アルファベット順、既存の並びに合わせる）:
 
@@ -709,7 +709,7 @@ from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_r
 - `from screening.universe import UNIVERSE, UNIVERSE_NAMES` の直前に `from screening.sectors import SECTOR_MAP`
 - `from screening.universe import ...` の直後・`from stock_detail.detail import generate_stock_detail` の直前に `from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns`（`sector_analysis` は `screening` の後、`stock_detail` の前）
 
-- [ ] **Step 2: タブ定義に新タブを追加する**
+- [x] **Step 2: タブ定義に新タブを追加する**
 
 現状:
 ```python
@@ -725,7 +725,7 @@ tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector = st.tabs(
 )
 ```
 
-- [ ] **Step 3: ファイル末尾に新タブの中身を追加する**
+- [x] **Step 3: ファイル末尾に新タブの中身を追加する**
 
 現状のファイル末尾（一括バックテストタブの終わり、`st.markdown(DISCLAIMER_NOTICE)`まで）の直後に、以下を追加する:
 
@@ -868,12 +868,12 @@ with tab_sector:
         st.markdown(DISCLAIMER_NOTICE)
 ```
 
-- [ ] **Step 4: 既存テストスイートを実行し、副作用がないことを確認する**
+- [x] **Step 4: 既存テストスイートを実行し、副作用がないことを確認する**
 
 Run: `cd app && uv run pytest -v`
 Expected: 全件PASS（`app.py`はテスト対象外のため件数に変化はない）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 cd app
@@ -891,12 +891,14 @@ git commit -m "feat: セクターローテーションタブをapp.pyに追加"
 - Consumes: Task 1〜4で実装した一式
 - Produces: なし（確認結果をこのタスクの完了条件とする）
 
-- [ ] **Step 1: アプリを起動する**
+- [x] **Step 1: アプリを起動する**
 
 Run: `cd app && uv run python -m streamlit run app.py`
 Expected: エラーなく起動し、5つ目のタブ「セクターローテーション」が表示される
 
-- [ ] **Step 2: セクターローテーションタブを実行する**
+実施結果: `--server.headless true`で起動し、Playwright（Chromium）で実接続。5つ目のタブ「セクターローテーション」が表示され、コンソールエラーなし。
+
+- [x] **Step 2: セクターローテーションタブを実行する**
 
 タブを開き、期間を選択して「分析を実行」をクリックする。
 Expected:
@@ -906,22 +908,28 @@ Expected:
 - 相関上位5ペアのAIコメントが表示される
 - 免責事項がタブ末尾に表示される
 
-- [ ] **Step 3: キャッシュ動作を確認する**
+実施結果: 初回実行は33秒で完了（228銘柄取得＋相関計算＋AIコメント生成）。ヒートマップ・リード/ラグ表（相関係数降順）・AIコメント（「過去の統計的傾向」「将来を保証しない」旨を含む適切な内容）・免責事項すべて表示を確認。なお実データでは相関最上位のペアはいずれもラグ0日（同時相関）が中心となった（例: 建設・資材→機械 相関0.865、金融(除く銀行)→銀行 相関0.851）。これは市場全体の連動（同日の地合い）が個別業種間の日次ラグより支配的であるという実データ上の妥当な結果であり、実装上の不具合ではない（`compute_lead_lag_pairs`のテストで非ゼロラグの検出自体は人工データで検証済み）。
+
+- [x] **Step 3: キャッシュ動作を確認する**
 
 同じ期間で再度「分析を実行」をクリックし、即座に結果が表示される（キャッシュヒット）ことを確認する。「キャッシュを無視して再生成する」をオンにして再実行し、再計算されることを確認する。
 
-- [ ] **Step 4: 他タブに影響がないことを確認する**
+実施結果: 2回目の実行（キャッシュあり）は約0.4〜1秒で完了（キャッシュヒット）。「キャッシュを無視して再生成する」をチェックして再実行したところ24.6秒かかり、`data/cache/`内の`sector-rotation-<hash>.txt`のタイムスタンプが実行時刻に更新されていることを確認（再計算が実際に行われたことの裏付け）。
+
+- [x] **Step 4: 他タブに影響がないことを確認する**
 
 ポートフォリオ・スクリーニング・バックテスト・一括バックテストの各タブを開き、これまで通り動作することを確認する（`console --errors`相当のブラウザエラー監視でも確認）。
 
-このタスクにチェックボックスの完了以外の成果物はない。すべて期待通りであればTask 5完了とする。
+実施結果: 4タブすべてクリックしてエラーなく表示されることを確認、コンソールエラーなし。
+
+このタスクにチェックボックスの完了以外の成果物はない。すべて期待通り完了した。
 
 ---
 
 ## Global Constraintsの確認（実装完了時のチェックリスト）
 
-- [ ] 新規の実行時依存が`pyproject.toml`に追加されていないこと
-- [ ] `SECTOR_MAP`のキー集合が`UNIVERSE`と完全一致すること（`tests/test_sectors.py`でPASS）
-- [ ] AIプロンプト・UI表示に売買の推奨・指示表現が含まれていないこと
-- [ ] `DISCLAIMER_NOTICE`がタブ末尾に表示されること
-- [ ] `common/cache.py`のキャッシュキー生成ロジック・ファイル形式に変更がないこと
+- [x] 新規の実行時依存が`pyproject.toml`に追加されていないこと
+- [x] `SECTOR_MAP`のキー集合が`UNIVERSE`と完全一致すること（`tests/test_sectors.py`でPASS）
+- [x] AIプロンプト・UI表示に売買の推奨・指示表現が含まれていないこと
+- [x] `DISCLAIMER_NOTICE`がタブ末尾に表示されること
+- [x] `common/cache.py`のキャッシュキー生成ロジック・ファイル形式に変更がないこと
