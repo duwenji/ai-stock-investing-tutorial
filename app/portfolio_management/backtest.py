@@ -5,21 +5,7 @@ from data_api.llm_client import call_llm as default_call_llm
 from prompt_patterns.backtest_explanation import build_backtest_prompt
 
 
-def run_ma_crossover_backtest(
-    prices: pd.Series,
-    short_window: int = 25,
-    long_window: int = 75,
-    transaction_cost_pct: float = 0.0,
-) -> dict:
-    """移動平均クロスオーバー戦略をベクトル化してバックテストする。"""
-    short_ma = prices.rolling(short_window).mean()
-    long_ma = prices.rolling(long_window).mean()
-
-    # 短期MAが長期MAを上回っている日をロングポジション(1)とする。
-    # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
-    # （ルックアヘッドバイアス回避）。
-    position = (short_ma > long_ma).astype(int).shift(1).fillna(0)
-
+def _finalize_backtest(prices: pd.Series, position: pd.Series, transaction_cost_pct: float) -> dict:
     daily_return = prices.pct_change().fillna(0)
     strategy_return = position * daily_return
 
@@ -47,6 +33,24 @@ def run_ma_crossover_backtest(
         "max_drawdown_pct": round(max_drawdown * 100, 2),
         "trade_days": int(len(trade_days)),
     }
+
+
+def run_ma_crossover_backtest(
+    prices: pd.Series,
+    short_window: int = 25,
+    long_window: int = 75,
+    transaction_cost_pct: float = 0.0,
+) -> dict:
+    """移動平均クロスオーバー戦略をベクトル化してバックテストする。"""
+    short_ma = prices.rolling(short_window).mean()
+    long_ma = prices.rolling(long_window).mean()
+
+    # 短期MAが長期MAを上回っている日をロングポジション(1)とする。
+    # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
+    # （ルックアヘッドバイアス回避）。
+    position = (short_ma > long_ma).astype(int).shift(1).fillna(0)
+
+    return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
 BACKTEST_PRESETS: list[tuple[str, int, int]] = [
