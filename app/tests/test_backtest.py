@@ -5,6 +5,7 @@ from portfolio_management.backtest import (
     BACKTEST_PRESETS,
     generate_backtest_explanation,
     run_backtest_comparison,
+    run_bollinger_reversal_backtest,
     run_ma_crossover_backtest,
     run_macd_crossover_backtest,
     run_rsi_reversal_backtest,
@@ -156,3 +157,35 @@ def test_run_macd_crossover_backtest_applies_transaction_cost_on_position_change
     assert result["max_drawdown_pct"] == -0.1
     assert result["benchmark_return_pct"] == 2.0
     assert result["trade_days"] == 1
+
+
+def test_run_bollinger_reversal_backtest_enters_below_lower_band_and_exits_at_middle_band():
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+    prices = pd.Series([100, 100, 70, 100, 100], index=dates)
+
+    result = run_bollinger_reversal_backtest(prices, window=3, num_std=1.0)
+
+    assert result == {
+        "total_return_pct": 42.86,
+        "benchmark_return_pct": 0.0,
+        "win_rate_pct": 100.0,
+        "max_drawdown_pct": 0.0,
+        "trade_days": 1,
+    }
+
+
+def test_run_bollinger_reversal_backtest_applies_transaction_cost_on_position_change():
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+    prices = pd.Series([100, 100, 70, 100, 100], index=dates)
+
+    result = run_bollinger_reversal_backtest(
+        prices, window=3, num_std=1.0, transaction_cost_pct=0.1
+    )
+
+    assert result == {
+        "total_return_pct": 42.61,
+        "benchmark_return_pct": 0.0,
+        "win_rate_pct": 100.0,
+        "max_drawdown_pct": -0.1,
+        "trade_days": 1,
+    }

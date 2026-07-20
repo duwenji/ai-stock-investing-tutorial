@@ -107,6 +107,34 @@ def run_macd_crossover_backtest(
     return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
+def run_bollinger_reversal_backtest(
+    prices: pd.Series,
+    window: int = 20,
+    num_std: float = 2.0,
+    transaction_cost_pct: float = 0.0,
+) -> dict:
+    """ボリンジャーバンド逆張り戦略をベクトル化してバックテストする。"""
+    middle_band = prices.rolling(window).mean()
+    band_std = prices.rolling(window).std()
+    lower_band = middle_band - num_std * band_std
+
+    # 終値が下バンドを下回った日にロングエントリー、
+    # 中心線（移動平均）以上に回帰した日に手仕舞いする。
+    entry = prices < lower_band
+    exit_signal = prices >= middle_band
+
+    raw_position = pd.Series(index=prices.index, dtype=float)
+    raw_position[entry] = 1.0
+    raw_position[exit_signal] = 0.0
+    held_position = raw_position.ffill().fillna(0)
+
+    # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
+    # （ルックアヘッドバイアス回避）。
+    position = held_position.shift(1).fillna(0)
+
+    return _finalize_backtest(prices, position, transaction_cost_pct)
+
+
 BACKTEST_PRESETS: list[tuple[str, int, int]] = [
     ("短期(5/25)", 5, 25),
     ("標準(25/75)", 25, 75),
