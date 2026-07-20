@@ -10,6 +10,7 @@ from analysis_agents.fundamental_agent import analyze_fundamentals
 from analysis_agents.news_research_agent import research_news_batch
 from analysis_agents.technical_agent import analyze_technical
 from common.cache import read_cache, write_cache
+from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm, check_claude_cli_available
@@ -34,7 +35,10 @@ from prompt_patterns.screening import (
     build_screening_prompt,
     generate_screening_comments,
 )
+from prompt_patterns.sector_rotation import generate_sector_rotation_comments
+from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
+from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
 from stock_detail.detail import generate_stock_detail
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -47,6 +51,21 @@ def _cached_fetch_japanese_name(ticker: str) -> str | None:
     return fetch_japanese_name(ticker)
 
 
+@st.cache_data(ttl=60 * 30)
+def _cached_fetch_price_history(ticker: str, period: str):
+    return fetch_price_history(ticker, period=period)
+
+
+@st.cache_data(ttl=60 * 30)
+def _cached_analyze_fundamentals(ticker: str) -> dict:
+    return analyze_fundamentals(ticker)
+
+
+@st.cache_data(ttl=60 * 30)
+def _cached_fetch_news(ticker: str) -> list[dict]:
+    return fetch_news(ticker)
+
+
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
 
 try:
@@ -57,8 +76,8 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-tab_portfolio, tab_screening, tab_backtest, tab_ranking = st.tabs(
-    ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト"]
+tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector = st.tabs(
+    ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト", "セクターローテーション"]
 )
 
 
@@ -253,15 +272,28 @@ with tab_portfolio:
             technicals_by_ticker = {}
             news_by_ticker = {}
 
-            for holding in holdings:
-                ticker = holding["ticker"]
-                history = fetch_price_history(ticker, period="6mo")
+            def _fetch_holding_data(ticker: str):
+                history = _cached_fetch_price_history(ticker, "6mo")
+                fundamentals = _cached_analyze_fundamentals(ticker)
+                technical = analyze_technical(history)
+                news = _cached_fetch_news(ticker)
+                return history, fundamentals, technical, news
+
+            holding_tickers = [holding["ticker"] for holding in holdings]
+            with st.spinner("保有銘柄データを取得中..."):
+                holding_results = map_concurrently(holding_tickers, _fetch_holding_data)
+
+            for ticker in holding_tickers:
+                result = holding_results[ticker]
+                if isinstance(result, Exception):
+                    continue
+                history, fundamentals, technical, news = result
                 if not history.empty:
                     current_prices[ticker] = float(history["Close"].iloc[-1])
                     price_histories[ticker] = history["Close"]
-                fundamentals_by_ticker[ticker] = analyze_fundamentals(ticker)
-                technicals_by_ticker[ticker] = analyze_technical(history)
-                news_by_ticker[ticker] = fetch_news(ticker)
+                fundamentals_by_ticker[ticker] = fundamentals
+                technicals_by_ticker[ticker] = technical
+                news_by_ticker[ticker] = news
 
             news_sentiment_by_ticker = research_news_batch(news_by_ticker, call_llm=call_llm)
 
@@ -396,7 +428,7 @@ with tab_backtest:
     if backtest_ticker and st.button("バックテストを実行"):
         strategy = STRATEGIES[backtest_strategy]
         transaction_cost_pct = 0.1 if apply_transaction_cost else 0.0
-        history = fetch_price_history(backtest_ticker, period=backtest_period)
+        history = _cached_fetch_price_history(backtest_ticker, backtest_period)
 
         if history.empty or len(history) < strategy["min_days"]:
             st.error(
@@ -487,23 +519,17 @@ with tab_ranking:
         if payload is None:
             prices_by_ticker = {}
             skipped_tickers = []
-            progress = st.progress(0.0, text="株価データを取得中...")
-            for i, ticker in enumerate(target_tickers):
-                try:
-                    history = fetch_price_history(ticker, period=ranking_period)
-                except Exception:
-                    skipped_tickers.append(ticker)
-                    history = None
-                if history is not None and not history.empty:
-                    prices_by_ticker[ticker] = history["Close"]
-                else:
-                    if ticker not in skipped_tickers:
-                        skipped_tickers.append(ticker)
-                progress.progress(
-                    (i + 1) / len(target_tickers),
-                    text=f"株価データを取得中... ({i + 1}/{len(target_tickers)})",
+            with st.spinner(f"株価データを取得中...（{len(target_tickers)}銘柄）"):
+                price_results = map_concurrently(
+                    target_tickers,
+                    lambda ticker: _cached_fetch_price_history(ticker, ranking_period),
                 )
-            progress.empty()
+            for ticker in target_tickers:
+                history = price_results[ticker]
+                if isinstance(history, Exception) or history is None or history.empty:
+                    skipped_tickers.append(ticker)
+                else:
+                    prices_by_ticker[ticker] = history["Close"]
 
             if not prices_by_ticker:
                 st.error("バックテスト可能な銘柄がありませんでした。")
@@ -585,5 +611,141 @@ with tab_ranking:
         for row in payload["ranking_rows"][:5]:
             ticker = row["ticker"]
             st.write(f"**{ticker}**: {payload['comments'].get(ticker, 'コメント生成失敗')}")
+
+        st.markdown(DISCLAIMER_NOTICE)
+
+with tab_sector:
+    st.header("セクターローテーション")
+    st.caption(
+        "UNIVERSE銘柄を17業種に分類し、業種間の値動きの時差相関（リード・ラグ）を"
+        "過去の株価データから計算します。あくまで過去の統計的傾向であり、"
+        "将来の値動きを保証するものではありません。"
+    )
+
+    sector_period = st.selectbox(
+        "取得期間", ["6mo", "1y", "2y"], index=1, key="sector_period"
+    )
+    sector_force_regenerate = st.checkbox(
+        "キャッシュを無視して再生成する", key="sector_force_regenerate"
+    )
+
+    if st.button("分析を実行"):
+        cache_key = "sector-rotation-" + hashlib.sha256(
+            f"{sector_period}-{'-'.join(sorted(UNIVERSE))}".encode("utf-8")
+        ).hexdigest()[:12]
+        cached_payload = (
+            None if sector_force_regenerate else read_cache(CACHE_DIR, cache_key)
+        )
+        payload = json.loads(cached_payload) if cached_payload is not None else None
+
+        if payload is None:
+            skipped_tickers = []
+            prices_by_ticker = {}
+            with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
+                price_results = map_concurrently(
+                    UNIVERSE,
+                    lambda ticker: _cached_fetch_price_history(ticker, sector_period),
+                )
+            for ticker in UNIVERSE:
+                history = price_results[ticker]
+                if isinstance(history, Exception) or history is None or history.empty:
+                    skipped_tickers.append(ticker)
+                else:
+                    prices_by_ticker[ticker] = history["Close"]
+
+            if not prices_by_ticker:
+                st.error("分析可能な銘柄がありませんでした。")
+                payload = None
+            else:
+                sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
+                excluded_sectors = sorted(
+                    set(SECTOR_MAP.values()) - set(sector_returns.keys())
+                )
+                pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
+                comments = generate_sector_rotation_comments(pairs[:5], call_llm=call_llm)
+                payload = {
+                    "pairs": pairs,
+                    "skipped_tickers": skipped_tickers,
+                    "excluded_sectors": excluded_sectors,
+                    "comments": comments,
+                }
+                write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+
+        if payload is not None:
+            st.session_state["sector_payload"] = payload
+
+    if st.session_state.get("sector_payload") is not None:
+        payload = st.session_state["sector_payload"]
+        pairs = payload["pairs"]
+
+        if pairs:
+            sectors = sorted(
+                {pair["leading_sector"] for pair in pairs}
+                | {pair["lagging_sector"] for pair in pairs}
+            )
+            corr_matrix = pd.DataFrame(1.0, index=sectors, columns=sectors)
+            for pair in pairs:
+                a, b = pair["leading_sector"], pair["lagging_sector"]
+                value = abs(pair["correlation"])
+                corr_matrix.loc[a, b] = value
+                corr_matrix.loc[b, a] = value
+
+            heatmap_df = (
+                corr_matrix.reset_index()
+                .melt(id_vars="index", var_name="sector_b", value_name="correlation")
+                .rename(columns={"index": "sector_a"})
+            )
+
+            st.subheader("業種間相関ヒートマップ")
+            heatmap = (
+                alt.Chart(heatmap_df)
+                .mark_rect()
+                .encode(
+                    x=alt.X("sector_a:N", title=None),
+                    y=alt.Y("sector_b:N", title=None),
+                    color=alt.Color(
+                        "correlation:Q", scale=alt.Scale(scheme="reds", domain=[0, 1])
+                    ),
+                    tooltip=["sector_a", "sector_b", "correlation"],
+                )
+                .properties(height=500)
+            )
+            st.altair_chart(heatmap, width="stretch")
+
+            st.subheader("リード・ラグ上位ペア")
+            pairs_df = pd.DataFrame(pairs)[
+                ["leading_sector", "lagging_sector", "lag_days", "correlation"]
+            ]
+            st.dataframe(
+                pairs_df,
+                column_config={
+                    "leading_sector": st.column_config.TextColumn("先行業種"),
+                    "lagging_sector": st.column_config.TextColumn("追随業種"),
+                    "lag_days": st.column_config.NumberColumn("ラグ（営業日）"),
+                    "correlation": st.column_config.NumberColumn("相関係数"),
+                },
+                hide_index=True,
+            )
+
+            st.subheader("相関上位5ペアのAIコメント")
+            for pair in pairs[:5]:
+                key = f"{pair['leading_sector']}->{pair['lagging_sector']}"
+                st.write(
+                    f"**{pair['leading_sector']} → {pair['lagging_sector']}**: "
+                    f"{payload['comments'].get(key, 'コメント生成失敗')}"
+                )
+        else:
+            st.info("有効な業種ペアがありませんでした。")
+
+        if payload["skipped_tickers"]:
+            st.info(
+                "データ取得・データ不足によりスキップした銘柄: "
+                + ", ".join(payload["skipped_tickers"])
+            )
+        if payload["excluded_sectors"]:
+            st.info(
+                "構成銘柄が取得できず分析から除外した業種: "
+                + ", ".join(payload["excluded_sectors"])
+            )
 
         st.markdown(DISCLAIMER_NOTICE)
