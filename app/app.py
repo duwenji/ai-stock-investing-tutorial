@@ -189,13 +189,13 @@ with tab_portfolio:
 
     if holdings:
         st.subheader("銘柄詳細を見る")
-        for holding in holdings:
+        for i, holding in enumerate(holdings):
             ticker = holding["ticker"]
             name = candidate_names.get(ticker, "")
             col_ticker, col_name, col_button = st.columns([2, 4, 2])
             col_ticker.write(ticker)
             col_name.write(name)
-            if col_button.button("詳細", key=f"portfolio_detail_{ticker}"):
+            if col_button.button("詳細", key=f"portfolio_detail_{i}_{ticker}"):
                 show_stock_detail_dialog(ticker, name)
 
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
