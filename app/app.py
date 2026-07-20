@@ -34,6 +34,7 @@ from prompt_patterns.screening import (
     generate_screening_comments,
 )
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
+from stock_detail.detail import generate_stock_detail
 
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
@@ -58,6 +59,65 @@ st.sidebar.markdown(DISCLAIMER_NOTICE)
 tab_portfolio, tab_screening, tab_backtest, tab_ranking = st.tabs(
     ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト"]
 )
+
+
+@st.dialog("銘柄詳細情報", width="large")
+def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
+    with st.spinner("銘柄情報を取得中..."):
+        detail = generate_stock_detail(ticker, name, CACHE_DIR, call_llm=call_llm)
+
+    st.subheader(f"{ticker} {detail.get('name') or ''}")
+
+    price_history = detail["price_history"]
+    if price_history["dates"]:
+        chart_df = pd.DataFrame(
+            {"Close": price_history["close"]},
+            index=pd.to_datetime(price_history["dates"]),
+        )
+        st.line_chart(chart_df)
+    else:
+        st.info("株価データを取得できませんでした。")
+
+    fundamentals = detail["fundamentals"]
+    col1, col2, col3 = st.columns(3)
+    col1.metric("PER", fundamentals.get("per") if fundamentals.get("per") is not None else "―")
+    col2.metric("PBR", fundamentals.get("pbr") if fundamentals.get("pbr") is not None else "―")
+    col3.metric(
+        "配当利回り(%)",
+        fundamentals.get("dividend_yield")
+        if fundamentals.get("dividend_yield") is not None
+        else "―",
+    )
+
+    st.write(f"テクニカルシグナル: **{detail['technical'].get('signal')}**")
+
+    st.subheader("AI総合分析コメント")
+    st.write(detail["comment"])
+
+    st.subheader("関連ニュース")
+    news_items = detail["news"]
+    if not news_items:
+        st.write("ニュースが取得できませんでした。")
+    for item in news_items:
+        title = item.get("title") or "(タイトルなし)"
+        publisher = item.get("publisher") or "?"
+        link = item.get("link")
+        if link:
+            st.markdown(f"- [{title}]({link})（{publisher}）")
+        else:
+            st.markdown(f"- {title}（{publisher}）")
+
+    st.markdown(DISCLAIMER_NOTICE)
+
+
+def _handle_table_selection(state_key: str, event, df: pd.DataFrame) -> None:
+    current = event.selection.rows[0] if event.selection.rows else None
+    if current != st.session_state.get(state_key):
+        st.session_state[state_key] = current
+        if current is not None and current < len(df):
+            row = df.iloc[current]
+            show_stock_detail_dialog(row["ticker"], row.get("name") or "")
+
 
 with tab_portfolio:
     st.header("保有銘柄ポートフォリオ")
