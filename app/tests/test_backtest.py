@@ -6,6 +6,7 @@ from portfolio_management.backtest import (
     generate_backtest_explanation,
     run_backtest_comparison,
     run_ma_crossover_backtest,
+    run_rsi_reversal_backtest,
 )
 
 
@@ -93,3 +94,35 @@ def test_generate_backtest_explanation_passes_ticker_and_comparison_to_prompt():
 
     assert "AAA.T" in captured_prompts[0]
     assert '"A"' in captured_prompts[0]
+
+
+def test_run_rsi_reversal_backtest_enters_on_oversold_recovery_and_exits_on_overbought():
+    dates = pd.date_range("2026-01-01", periods=9, freq="D")
+    prices = pd.Series([100, 90, 80, 70, 90, 110, 130, 130, 130], index=dates)
+
+    result = run_rsi_reversal_backtest(prices, period=3, oversold=30, overbought=70)
+
+    assert result == {
+        "total_return_pct": 22.22,
+        "benchmark_return_pct": 30.0,
+        "win_rate_pct": 100.0,
+        "max_drawdown_pct": 0.0,
+        "trade_days": 1,
+    }
+
+
+def test_run_rsi_reversal_backtest_applies_transaction_cost_on_position_change():
+    dates = pd.date_range("2026-01-01", periods=9, freq="D")
+    prices = pd.Series([100, 90, 80, 70, 90, 110, 130, 130, 130], index=dates)
+
+    result = run_rsi_reversal_backtest(
+        prices, period=3, oversold=30, overbought=70, transaction_cost_pct=0.1
+    )
+
+    assert result == {
+        "total_return_pct": 22.0,
+        "benchmark_return_pct": 30.0,
+        "win_rate_pct": 100.0,
+        "max_drawdown_pct": -0.1,
+        "trade_days": 1,
+    }

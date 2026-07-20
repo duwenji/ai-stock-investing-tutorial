@@ -53,6 +53,39 @@ def run_ma_crossover_backtest(
     return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
+def run_rsi_reversal_backtest(
+    prices: pd.Series,
+    period: int = 14,
+    oversold: int = 30,
+    overbought: int = 70,
+    transaction_cost_pct: float = 0.0,
+) -> dict:
+    """RSI逆張り戦略をベクトル化してバックテストする。"""
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    # RSIが売られすぎ水準を下から上に回復した日にロングエントリー、
+    # 買われすぎ水準に達した日に手仕舞いする。
+    entry = (rsi.shift(1) < oversold) & (rsi >= oversold)
+    exit_signal = rsi >= overbought
+
+    raw_position = pd.Series(index=prices.index, dtype=float)
+    raw_position[entry] = 1.0
+    raw_position[exit_signal] = 0.0
+    held_position = raw_position.ffill().fillna(0)
+
+    # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
+    # （ルックアヘッドバイアス回避）。
+    position = held_position.shift(1).fillna(0)
+
+    return _finalize_backtest(prices, position, transaction_cost_pct)
+
+
 BACKTEST_PRESETS: list[tuple[str, int, int]] = [
     ("短期(5/25)", 5, 25),
     ("標準(25/75)", 25, 75),
