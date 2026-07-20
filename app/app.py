@@ -481,49 +481,63 @@ with tab_ranking:
                 write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         if payload is not None:
-            candidate_names = build_candidate_names(
-                load_holdings(HOLDINGS_PATH), resolve_name=_cached_fetch_japanese_name
-            )
-            ranking_df = pd.DataFrame(payload["ranking_rows"])
-            ranking_df["name"] = ranking_df["ticker"].map(candidate_names).fillna("")
-            ranking_df.insert(0, "順位", range(1, len(ranking_df) + 1))
-            ranking_df = ranking_df[
-                [
-                    "順位",
-                    "ticker",
-                    "name",
-                    "total_return_pct",
-                    "benchmark_return_pct",
-                    "win_rate_pct",
-                    "max_drawdown_pct",
-                    "risk_adjusted_return",
-                ]
+            st.session_state["ranking_payload"] = payload
+            st.session_state["ranking_strategy_label"] = ranking_strategy
+            st.session_state["ranking_selected_row"] = None
+            st.session_state["ranking_table"] = {"selection": {"rows": [], "columns": []}}
+
+    if st.session_state.get("ranking_payload") is not None:
+        payload = st.session_state["ranking_payload"]
+        ranking_strategy_label = st.session_state["ranking_strategy_label"]
+
+        candidate_names = build_candidate_names(
+            load_holdings(HOLDINGS_PATH), resolve_name=_cached_fetch_japanese_name
+        )
+        ranking_df = pd.DataFrame(payload["ranking_rows"])
+        ranking_df["name"] = ranking_df["ticker"].map(candidate_names).fillna("")
+        ranking_df.insert(0, "順位", range(1, len(ranking_df) + 1))
+        ranking_df = ranking_df[
+            [
+                "順位",
+                "ticker",
+                "name",
+                "total_return_pct",
+                "benchmark_return_pct",
+                "win_rate_pct",
+                "max_drawdown_pct",
+                "risk_adjusted_return",
             ]
+        ]
 
-            st.subheader(f"{ranking_strategy}（{payload['preset_label']}）ランキング")
-            st.dataframe(
-                ranking_df,
-                column_config={
-                    "ticker": st.column_config.TextColumn("銘柄コード"),
-                    "name": st.column_config.TextColumn("銘柄名"),
-                    "total_return_pct": st.column_config.NumberColumn("累積リターン(%)"),
-                    "benchmark_return_pct": st.column_config.NumberColumn("ベンチマーク(%)"),
-                    "win_rate_pct": st.column_config.NumberColumn("勝率(%)"),
-                    "max_drawdown_pct": st.column_config.NumberColumn("最大DD(%)"),
-                    "risk_adjusted_return": st.column_config.NumberColumn("リスク調整済みリターン"),
-                },
-                hide_index=True,
+        st.subheader(f"{ranking_strategy_label}（{payload['preset_label']}）ランキング")
+        st.caption("行をクリックすると銘柄詳細を表示します。")
+        event = st.dataframe(
+            ranking_df,
+            column_config={
+                "ticker": st.column_config.TextColumn("銘柄コード"),
+                "name": st.column_config.TextColumn("銘柄名"),
+                "total_return_pct": st.column_config.NumberColumn("累積リターン(%)"),
+                "benchmark_return_pct": st.column_config.NumberColumn("ベンチマーク(%)"),
+                "win_rate_pct": st.column_config.NumberColumn("勝率(%)"),
+                "max_drawdown_pct": st.column_config.NumberColumn("最大DD(%)"),
+                "risk_adjusted_return": st.column_config.NumberColumn("リスク調整済みリターン"),
+            },
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="ranking_table",
+        )
+        _handle_table_selection("ranking_selected_row", event, ranking_df)
+
+        if payload["skipped_tickers"]:
+            st.info(
+                "データ取得・データ不足によりスキップした銘柄: "
+                + ", ".join(payload["skipped_tickers"])
             )
 
-            if payload["skipped_tickers"]:
-                st.info(
-                    "データ取得・データ不足によりスキップした銘柄: "
-                    + ", ".join(payload["skipped_tickers"])
-                )
+        st.subheader("上位5銘柄のAIコメント")
+        for row in payload["ranking_rows"][:5]:
+            ticker = row["ticker"]
+            st.write(f"**{ticker}**: {payload['comments'].get(ticker, 'コメント生成失敗')}")
 
-            st.subheader("上位5銘柄のAIコメント")
-            for row in payload["ranking_rows"][:5]:
-                ticker = row["ticker"]
-                st.write(f"**{ticker}**: {payload['comments'].get(ticker, 'コメント生成失敗')}")
-
-            st.markdown(DISCLAIMER_NOTICE)
+        st.markdown(DISCLAIMER_NOTICE)
