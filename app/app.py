@@ -18,6 +18,11 @@ from data_api.stock_price_api import (
     fetch_price_history,
     fetch_universe_fundamentals,
 )
+from portfolio_management.backtest import (
+    BACKTEST_PRESETS,
+    generate_backtest_explanation,
+    run_backtest_comparison,
+)
 from portfolio_management.review import generate_portfolio_review
 from portfolio_management.storage import load_holdings, save_holdings
 from portfolio_management.ticker_names import build_candidate_names
@@ -48,7 +53,9 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-tab_portfolio, tab_screening = st.tabs(["ポートフォリオ", "スクリーニング"])
+tab_portfolio, tab_screening, tab_backtest = st.tabs(
+    ["ポートフォリオ", "スクリーニング", "バックテスト"]
+)
 
 with tab_portfolio:
     st.header("保有銘柄ポートフォリオ")
@@ -235,3 +242,67 @@ with tab_screening:
                         f"**{row.ticker} {row.name}**: "
                         f"{comments.get(row.ticker, 'コメント生成失敗')}"
                     )
+
+with tab_backtest:
+    st.header("移動平均クロスオーバー戦略のバックテスト")
+
+    backtest_ticker = st.text_input(
+        "銘柄コード", placeholder="7203.T", key="backtest_ticker"
+    )
+    backtest_period = st.selectbox(
+        "取得期間", ["1y", "3y", "5y"], index=1, key="backtest_period"
+    )
+    apply_transaction_cost = st.checkbox(
+        "取引コストを考慮する（1回あたり0.1%）", key="backtest_cost_checkbox"
+    )
+    backtest_force_regenerate = st.checkbox(
+        "キャッシュを無視して再生成する", key="backtest_force_regenerate"
+    )
+
+    if backtest_ticker and st.button("バックテストを実行"):
+        transaction_cost_pct = 0.1 if apply_transaction_cost else 0.0
+        history = fetch_price_history(backtest_ticker, period=backtest_period)
+        min_required_days = max(long_window for _, _, long_window in BACKTEST_PRESETS)
+
+        if history.empty or len(history) < min_required_days:
+            st.error(
+                "株価データが取得できないか、バックテストに必要な日数"
+                f"（{min_required_days}日）に満たないため実行できません。"
+            )
+        else:
+            prices = history["Close"]
+
+            comparison = run_backtest_comparison(
+                prices, transaction_cost_pct=transaction_cost_pct
+            )
+            comparison_df = pd.DataFrame(comparison).T
+            comparison_df.index.name = "パラメータ組"
+
+            st.subheader("パラメータ組ごとの比較")
+            st.dataframe(
+                comparison_df,
+                column_config={
+                    "total_return_pct": st.column_config.NumberColumn("累積リターン(%)"),
+                    "benchmark_return_pct": st.column_config.NumberColumn("ベンチマーク(%)"),
+                    "win_rate_pct": st.column_config.NumberColumn("勝率(%)"),
+                    "max_drawdown_pct": st.column_config.NumberColumn("最大DD(%)"),
+                    "trade_days": st.column_config.NumberColumn("取引日数"),
+                },
+            )
+
+            cache_key = "backtest-" + hashlib.sha256(
+                f"{backtest_ticker}-{backtest_period}-{transaction_cost_pct}".encode("utf-8")
+            ).hexdigest()[:12]
+            cached_explanation = (
+                None if backtest_force_regenerate else read_cache(CACHE_DIR, cache_key)
+            )
+
+            if cached_explanation is not None:
+                explanation = cached_explanation
+            else:
+                explanation = generate_backtest_explanation(
+                    backtest_ticker, prices, transaction_cost_pct=transaction_cost_pct
+                )
+                write_cache(CACHE_DIR, cache_key, explanation)
+
+            st.markdown(explanation)
