@@ -13,17 +13,17 @@
 
 ### 2.1 技術スタック
 
-| 項目               | 内容                                                                                          |
-| ------------------ | --------------------------------------------------------------------------------------------- |
-| UI                 | Streamlit（`st.tabs` による5タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）      |
-| データ処理         | pandas                                                                                        |
-| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート、業種間相関ヒートマップ。streamlit経由の間接依存）|
-| 株価・ニュース取得 | yfinance                                                                                      |
-| 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                         |
-| LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）|
-| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列）|
-| パッケージ管理     | uv（Python 3.14系）                                                                           |
-| テスト             | pytest（yfinance・`call_llm` はモック化）                                                   |
+| 項目               | 内容                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| UI                 | Streamlit（`st.tabs` による5タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）                  |
+| データ処理         | pandas                                                                                                     |
+| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート、業種間相関ヒートマップ。streamlit経由の間接依存） |
+| 株価・ニュース取得 | yfinance                                                                                                   |
+| 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                      |
+| LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）            |
+| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列）    |
+| パッケージ管理     | uv（Python 3.14系）                                                                                        |
+| テスト             | pytest（yfinance・`call_llm` はモック化）                                                                |
 
 ### 2.2 ディレクトリ構成
 
@@ -581,12 +581,12 @@ sequenceDiagram
 
 `app.py` で以下の薄いラッパー関数として定義され、Streamlitのセッション内で同一引数の呼び出し結果をメモリ上に保持する。ブラウザタブを開いている間、同一銘柄への重複した外部呼び出し（yfinance・スクレイピング）を抑制する目的で、ポートフォリオ・バックテスト・一括バックテスト・セクターローテーションの各タブから共通して呼び出される。
 
-| 関数 | ラップ対象 | TTL |
-| --- | --- | --- |
-| `_cached_fetch_japanese_name` | `fetch_japanese_name` | 24時間 |
-| `_cached_fetch_price_history` | `fetch_price_history` | 30分 |
-| `_cached_analyze_fundamentals` | `analyze_fundamentals` | 30分 |
-| `_cached_fetch_news` | `fetch_news` | 30分 |
+| 関数                             | ラップ対象               | TTL    |
+| -------------------------------- | ------------------------ | ------ |
+| `_cached_fetch_japanese_name`  | `fetch_japanese_name`  | 24時間 |
+| `_cached_fetch_price_history`  | `fetch_price_history`  | 30分   |
+| `_cached_analyze_fundamentals` | `analyze_fundamentals` | 30分   |
+| `_cached_fetch_news`           | `fetch_news`           | 30分   |
 
 **(b) 日次ファイルキャッシュ（`common/cache.py`, 日付ベース）**
 
@@ -609,15 +609,15 @@ data/
 
 #### データ一覧
 
-| データ                     | 保存先                                                 | キー・形式                                                                                                                            | 生成元                                               |
-| -------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 保有銘柄                   | `data/holdings.json`                                 | `[{"ticker": str, "shares": int, "cost": float}, ...]`                                                                              | ポートフォリオタブの「保存」ボタン（`storage.py`） |
-| ポートフォリオレビュー結果 | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁  | ポートフォリオタブ「レビューを生成」                 |
-| ユニバースfundamentals     | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                    | スクリーニングタブ（絞り込み実行時）                 |
-| 単一銘柄バックテスト解説   | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文（プレーンテキスト）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁                                                      | バックテストタブ「バックテストを実行」               |
-| 一括バックテストランキング | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments", "preset_label"}`。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁 | 一括バックテストタブ「一括バックテストを実行」       |
-| セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt` | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁                   | セクターローテーションタブ「分析を実行」             |
-| 銘柄詳細情報               | `data/cache/YYYY-MM-DD-stock-detail-<ticker>.txt`    | JSON文字列`{"ticker", "name", "price_history"(OHLCV), "fundamentals", "technical", "news", "comment"}`。キーはハッシュ化せず**ティッカーそのまま** | 銘柄詳細ダイアログ（`stock_detail/detail.py`）       |
+| データ                         | 保存先                                                 | キー・形式                                                                                                                                                 | 生成元                                               |
+| ------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 保有銘柄                       | `data/holdings.json`                                 | `[{"ticker": str, "shares": int, "cost": float}, ...]`                                                                                                   | ポートフォリオタブの「保存」ボタン（`storage.py`） |
+| ポートフォリオレビュー結果     | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁                       | ポートフォリオタブ「レビューを生成」                 |
+| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                                         | スクリーニングタブ（絞り込み実行時）                 |
+| 単一銘柄バックテスト解説       | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文（プレーンテキスト）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁                                                                           | バックテストタブ「バックテストを実行」               |
+| 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments", "preset_label"}`。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                      | 一括バックテストタブ「一括バックテストを実行」       |
+| セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt`   | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁                                       | セクターローテーションタブ「分析を実行」             |
+| 銘柄詳細情報                   | `data/cache/YYYY-MM-DD-stock-detail-<ticker>.txt`    | JSON文字列`{"ticker", "name", "price_history"(OHLCV), "fundamentals", "technical", "news", "comment"}`。キーはハッシュ化せず**ティッカーそのまま** | 銘柄詳細ダイアログ（`stock_detail/detail.py`）     |
 
 #### 保管方式のポイント（`common/cache.py`）
 
@@ -638,20 +638,20 @@ data/
 
 ### 5.5 エラーハンドリング一覧
 
-| 事象                                                  | 挙動                                                                      |
-| ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| Claude Code CLI未検出                                 | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）  |
-| LLMサブプロセスの非0終了                              | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                       |
-| LLM応答のJSONパース失敗（スクリーニング条件）         | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない              |
-| LLM応答のJSONパース失敗（各種コメント・センチメント） | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続    |
-| `holdings.json` 破損・読み込み失敗                  | 空リストにフォールバック                                                  |
-| 個別銘柄の株価データ取得失敗（ポートフォリオ）        | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続 |
-| 個別銘柄のfundamentals取得失敗（スクリーニング）      | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続    |
-| 個別銘柄の株価データ取得失敗（一括バックテスト）      | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                |
-| 個別銘柄の株価データ取得失敗（セクターローテーション）| `skipped_tickers` に記録、構成銘柄が全滅した業種は `excluded_sectors` に記録、全滅時のみエラー表示 |
-| 銘柄詳細ダイアログで株価データが空                    | `st.info("株価データを取得できませんでした。")` のみでチャート省略、他情報は表示継続 |
-| バックテスト対象の日数不足                            | エラー表示のみで実行しない                                                |
-| 旧形式キャッシュ（フォーマット非互換）                | JSONDecodeError、または（銘柄詳細情報の場合）`"open"`キー欠落として扱い再生成 |
+| 事象                                                   | 挙動                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Claude Code CLI未検出                                  | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）                                 |
+| LLMサブプロセスの非0終了                               | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                          |
+| LLM応答のJSONパース失敗（スクリーニング条件）          | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない                                                 |
+| LLM応答のJSONパース失敗（各種コメント・センチメント）  | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続                                       |
+| `holdings.json` 破損・読み込み失敗                   | 空リストにフォールバック                                                                                     |
+| 個別銘柄の株価データ取得失敗（ポートフォリオ）         | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続 |
+| 個別銘柄のfundamentals取得失敗（スクリーニング）       | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続                                     |
+| 個別銘柄の株価データ取得失敗（一括バックテスト）       | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                                                   |
+| 個別銘柄の株価データ取得失敗（セクターローテーション） | `skipped_tickers` に記録、構成銘柄が全滅した業種は `excluded_sectors` に記録、全滅時のみエラー表示       |
+| 銘柄詳細ダイアログで株価データが空                     | `st.info("株価データを取得できませんでした。")` のみでチャート省略、他情報は表示継続                       |
+| バックテスト対象の日数不足                             | エラー表示のみで実行しない                                                                                   |
+| 旧形式キャッシュ（フォーマット非互換）                 | JSONDecodeError、または（銘柄詳細情報の場合）`"open"`キー欠落として扱い再生成                              |
 
 ### 5.6 テスト方針
 
