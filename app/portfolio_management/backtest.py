@@ -86,6 +86,27 @@ def run_rsi_reversal_backtest(
     return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
+def run_macd_crossover_backtest(
+    prices: pd.Series,
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+    transaction_cost_pct: float = 0.0,
+) -> dict:
+    """MACDクロスオーバー戦略をベクトル化してバックテストする。"""
+    fast_ema = prices.ewm(span=fast, adjust=False).mean()
+    slow_ema = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+
+    # MACD線がシグナル線を上回っている日をロングポジション(1)とする。
+    # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
+    # （ルックアヘッドバイアス回避）。
+    position = (macd_line > signal_line).astype(int).shift(1).fillna(0)
+
+    return _finalize_backtest(prices, position, transaction_cost_pct)
+
+
 BACKTEST_PRESETS: list[tuple[str, int, int]] = [
     ("短期(5/25)", 5, 25),
     ("標準(25/75)", 25, 75),

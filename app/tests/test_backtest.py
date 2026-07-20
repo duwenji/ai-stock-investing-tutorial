@@ -6,6 +6,7 @@ from portfolio_management.backtest import (
     generate_backtest_explanation,
     run_backtest_comparison,
     run_ma_crossover_backtest,
+    run_macd_crossover_backtest,
     run_rsi_reversal_backtest,
 )
 
@@ -126,3 +127,32 @@ def test_run_rsi_reversal_backtest_applies_transaction_cost_on_position_change()
         "max_drawdown_pct": -0.1,
         "trade_days": 1,
     }
+
+
+def test_run_macd_crossover_backtest_shifts_signal_to_avoid_lookahead_bias():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+
+    result = run_macd_crossover_backtest(prices, fast=1, slow=2, signal=2)
+
+    assert result == {
+        "total_return_pct": 0.0,
+        "benchmark_return_pct": 2.0,
+        "win_rate_pct": 0.0,
+        "max_drawdown_pct": 0.0,
+        "trade_days": 1,
+    }
+
+
+def test_run_macd_crossover_backtest_applies_transaction_cost_on_position_change():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+
+    result = run_macd_crossover_backtest(
+        prices, fast=1, slow=2, signal=2, transaction_cost_pct=0.1
+    )
+
+    assert result["total_return_pct"] == -0.1
+    assert result["max_drawdown_pct"] == -0.1
+    assert result["benchmark_return_pct"] == 2.0
+    assert result["trade_days"] == 1
