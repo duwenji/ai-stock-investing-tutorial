@@ -33,11 +33,15 @@ def generate_stock_detail(
     news = fetch_news(ticker)
 
     if history.empty:
-        price_history = {"dates": [], "close": []}
+        price_history = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
     else:
         price_history = {
             "dates": [d.isoformat() for d in history.index],
+            "open": history["Open"].tolist(),
+            "high": history["High"].tolist(),
+            "low": history["Low"].tolist(),
             "close": history["Close"].tolist(),
+            "volume": history["Volume"].tolist(),
         }
 
     prompt = build_stock_detail_prompt(ticker, name, fundamentals, technical, news)

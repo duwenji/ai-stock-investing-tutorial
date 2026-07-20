@@ -5,7 +5,16 @@ from stock_detail.detail import generate_stock_detail
 
 def _fake_history():
     dates = pd.date_range("2026-01-01", periods=3, freq="D")
-    return pd.DataFrame({"Close": [100.0, 101.0, 102.0]}, index=dates)
+    return pd.DataFrame(
+        {
+            "Open": [99.0, 100.5, 101.5],
+            "High": [101.0, 102.0, 103.0],
+            "Low": [98.5, 100.0, 101.0],
+            "Close": [100.0, 101.0, 102.0],
+            "Volume": [1000, 1200, 900],
+        },
+        index=dates,
+    )
 
 
 def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
@@ -27,7 +36,11 @@ def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
         "name": "エーエー株式会社",
         "price_history": {
             "dates": ["2026-01-01T00:00:00", "2026-01-02T00:00:00", "2026-01-03T00:00:00"],
+            "open": [99.0, 100.5, 101.5],
+            "high": [101.0, 102.0, 103.0],
+            "low": [98.5, 100.0, 101.0],
             "close": [100.0, 101.0, 102.0],
+            "volume": [1000, 1200, 900],
         },
         "fundamentals": {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
         "technical": {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
@@ -42,13 +55,22 @@ def test_generate_stock_detail_handles_empty_price_history(tmp_path):
         None,
         tmp_path,
         call_llm=lambda prompt: "コメント",
-        fetch_price_history=lambda ticker, period: pd.DataFrame({"Close": []}),
+        fetch_price_history=lambda ticker, period: pd.DataFrame(
+            {"Open": [], "High": [], "Low": [], "Close": [], "Volume": []}
+        ),
         fetch_news=lambda ticker: [],
         analyze_fundamentals=lambda ticker: {"per": None, "pbr": None, "dividend_yield": None},
         analyze_technical=lambda history: {"ma_short": None, "ma_long": None, "signal": "データ不足"},
     )
 
-    assert result["price_history"] == {"dates": [], "close": []}
+    assert result["price_history"] == {
+        "dates": [],
+        "open": [],
+        "high": [],
+        "low": [],
+        "close": [],
+        "volume": [],
+    }
     assert result["news"] == []
     assert result["name"] is None
 
