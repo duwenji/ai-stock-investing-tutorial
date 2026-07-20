@@ -19,7 +19,7 @@ from data_api.stock_price_api import (
     fetch_universe_fundamentals,
 )
 from portfolio_management.backtest import (
-    BACKTEST_PRESETS,
+    STRATEGIES,
     generate_backtest_explanation,
     run_backtest_comparison,
 )
@@ -244,8 +244,11 @@ with tab_screening:
                     )
 
 with tab_backtest:
-    st.header("移動平均クロスオーバー戦略のバックテスト")
+    st.header("バックテスト")
 
+    backtest_strategy = st.selectbox(
+        "戦略", list(STRATEGIES.keys()), key="backtest_strategy"
+    )
     backtest_ticker = st.text_input(
         "銘柄コード", placeholder="7203.T", key="backtest_ticker"
     )
@@ -260,20 +263,20 @@ with tab_backtest:
     )
 
     if backtest_ticker and st.button("バックテストを実行"):
+        strategy = STRATEGIES[backtest_strategy]
         transaction_cost_pct = 0.1 if apply_transaction_cost else 0.0
         history = fetch_price_history(backtest_ticker, period=backtest_period)
-        min_required_days = max(long_window for _, _, long_window in BACKTEST_PRESETS)
 
-        if history.empty or len(history) < min_required_days:
+        if history.empty or len(history) < strategy["min_days"]:
             st.error(
                 "株価データが取得できないか、バックテストに必要な日数"
-                f"（{min_required_days}日）に満たないため実行できません。"
+                f"（{strategy['min_days']}日）に満たないため実行できません。"
             )
         else:
             prices = history["Close"]
 
             comparison = run_backtest_comparison(
-                prices, transaction_cost_pct=transaction_cost_pct
+                prices, strategy["func"], strategy["presets"], transaction_cost_pct
             )
             comparison_df = pd.DataFrame(comparison).T
             comparison_df.index.name = "パラメータ組"
@@ -291,7 +294,9 @@ with tab_backtest:
             )
 
             cache_key = "backtest-" + hashlib.sha256(
-                f"{backtest_ticker}-{backtest_period}-{transaction_cost_pct}".encode("utf-8")
+                f"{backtest_strategy}-{backtest_ticker}-{backtest_period}-{transaction_cost_pct}".encode(
+                    "utf-8"
+                )
             ).hexdigest()[:12]
             cached_explanation = (
                 None if backtest_force_regenerate else read_cache(CACHE_DIR, cache_key)
@@ -301,7 +306,12 @@ with tab_backtest:
                 explanation = cached_explanation
             else:
                 explanation = generate_backtest_explanation(
-                    backtest_ticker, prices, transaction_cost_pct=transaction_cost_pct
+                    backtest_ticker,
+                    prices,
+                    backtest_func=strategy["func"],
+                    strategy_name=backtest_strategy,
+                    presets=strategy["presets"],
+                    transaction_cost_pct=transaction_cost_pct,
                 )
                 write_cache(CACHE_DIR, cache_key, explanation)
 
