@@ -187,6 +187,17 @@ with tab_portfolio:
         st.success("保存しました。")
         holdings = new_holdings
 
+    if holdings:
+        st.subheader("銘柄詳細を見る")
+        for holding in holdings:
+            ticker = holding["ticker"]
+            name = candidate_names.get(ticker, "")
+            col_ticker, col_name, col_button = st.columns([2, 4, 2])
+            col_ticker.write(ticker)
+            col_name.write(name)
+            if col_button.button("詳細", key=f"portfolio_detail_{ticker}"):
+                show_stock_detail_dialog(ticker, name)
+
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
 
     if holdings and st.button("レビューを生成"):
