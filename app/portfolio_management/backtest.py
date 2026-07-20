@@ -1,5 +1,9 @@
 import pandas as pd
 
+from common.disclaimer import DISCLAIMER_NOTICE
+from data_api.llm_client import call_llm as default_call_llm
+from prompt_patterns.backtest_explanation import build_backtest_prompt
+
 
 def run_ma_crossover_backtest(
     prices: pd.Series,
@@ -65,3 +69,28 @@ def run_backtest_comparison(
         )
         for label, short_window, long_window in presets
     }
+
+
+def generate_backtest_explanation(
+    ticker: str,
+    prices: pd.Series,
+    presets: list[tuple[str, int, int]] = BACKTEST_PRESETS,
+    transaction_cost_pct: float = 0.0,
+    call_llm=default_call_llm,
+) -> str:
+    comparison = run_backtest_comparison(prices, presets, transaction_cost_pct)
+    prompt = build_backtest_prompt(ticker, comparison)
+    commentary = call_llm(prompt)
+
+    sections = [
+        DISCLAIMER_NOTICE,
+        "",
+        f"# バックテスト結果解説（{ticker}）",
+        "",
+        commentary,
+        "",
+        "---",
+        "",
+        DISCLAIMER_NOTICE,
+    ]
+    return "\n".join(sections)

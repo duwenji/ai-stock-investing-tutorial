@@ -1,7 +1,9 @@
 import pandas as pd
 
+from common.disclaimer import DISCLAIMER_NOTICE
 from portfolio_management.backtest import (
     BACKTEST_PRESETS,
+    generate_backtest_explanation,
     run_backtest_comparison,
     run_ma_crossover_backtest,
 )
@@ -61,3 +63,33 @@ def test_run_backtest_comparison_returns_result_per_preset_label():
         "trade_days": 1,
     }
     assert result == {"A": expected_single, "B": expected_single}
+
+
+def test_generate_backtest_explanation_includes_disclaimer_and_commentary():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    fake_call_llm = lambda prompt: "テスト用のバックテスト解説です。"
+
+    result = generate_backtest_explanation(
+        "AAA.T", prices, presets=[("A", 1, 2)], call_llm=fake_call_llm
+    )
+
+    assert result.count(DISCLAIMER_NOTICE) == 2
+    assert "テスト用のバックテスト解説です。" in result
+
+
+def test_generate_backtest_explanation_passes_ticker_and_comparison_to_prompt():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    captured_prompts = []
+
+    def fake_call_llm(prompt):
+        captured_prompts.append(prompt)
+        return "解説"
+
+    generate_backtest_explanation(
+        "AAA.T", prices, presets=[("A", 1, 2)], call_llm=fake_call_llm
+    )
+
+    assert "AAA.T" in captured_prompts[0]
+    assert '"A"' in captured_prompts[0]
