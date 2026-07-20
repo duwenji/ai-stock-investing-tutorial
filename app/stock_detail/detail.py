@@ -25,7 +25,9 @@ def generate_stock_detail(
     cache_key = f"stock-detail-{ticker}"
     cached = read_cache(cache_dir, cache_key)
     if cached is not None:
-        return json.loads(cached)
+        payload = json.loads(cached)
+        if "open" in payload["price_history"]:
+            return payload
 
     history = fetch_price_history(ticker, period="6mo")
     fundamentals = analyze_fundamentals(ticker)

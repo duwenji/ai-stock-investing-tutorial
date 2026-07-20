@@ -1,5 +1,8 @@
+import json
+
 import pandas as pd
 
+from common.cache import write_cache
 from stock_detail.detail import generate_stock_detail
 
 
@@ -108,3 +111,33 @@ def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path):
         analyze_technical=fail,
     )
     assert result["comment"] == "初回コメント"
+
+
+def test_generate_stock_detail_ignores_stale_cache_missing_ohlcv(tmp_path):
+    stale_payload = {
+        "ticker": "AAA.T",
+        "name": "エーエー株式会社",
+        "price_history": {
+            "dates": ["2026-01-01T00:00:00"],
+            "close": [100.0],
+        },
+        "fundamentals": {"per": 1, "pbr": 1, "dividend_yield": 1},
+        "technical": {"ma_short": 1, "ma_long": 1, "signal": "強気"},
+        "news": [],
+        "comment": "旧形式のキャッシュ",
+    }
+    write_cache(tmp_path, "stock-detail-AAA.T", json.dumps(stale_payload, ensure_ascii=False))
+
+    result = generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=lambda prompt: "再生成後のコメント",
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [],
+        analyze_fundamentals=lambda ticker: {"per": 1, "pbr": 1, "dividend_yield": 1},
+        analyze_technical=lambda history: {"ma_short": 1, "ma_long": 1, "signal": "強気"},
+    )
+
+    assert result["comment"] == "再生成後のコメント"
+    assert result["price_history"]["open"] == [99.0, 100.5, 101.5]

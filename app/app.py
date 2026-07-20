@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -71,10 +72,44 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     price_history = detail["price_history"]
     if price_history["dates"]:
         chart_df = pd.DataFrame(
-            {"Close": price_history["close"]},
-            index=pd.to_datetime(price_history["dates"]),
+            {
+                "date": pd.to_datetime(price_history["dates"]),
+                "open": price_history["open"],
+                "high": price_history["high"],
+                "low": price_history["low"],
+                "close": price_history["close"],
+                "volume": price_history["volume"],
+            }
         )
-        st.line_chart(chart_df)
+        chart_df["direction"] = chart_df.apply(
+            lambda row: "up" if row["close"] >= row["open"] else "down", axis=1
+        )
+        color_scale = alt.Scale(domain=["up", "down"], range=["#26a69a", "#ef5350"])
+
+        base = alt.Chart(chart_df).encode(x=alt.X("date:T", title="日付"))
+        wick = base.mark_rule().encode(
+            y=alt.Y("low:Q", title="株価", scale=alt.Scale(zero=False)),
+            y2="high:Q",
+            color=alt.Color("direction:N", scale=color_scale, legend=None),
+        )
+        body = base.mark_bar().encode(
+            y="open:Q",
+            y2="close:Q",
+            color=alt.Color("direction:N", scale=color_scale, legend=None),
+        )
+        st.altair_chart((wick + body).properties(height=300), width="stretch")
+
+        volume_chart = (
+            alt.Chart(chart_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("volume:Q", title="出来高"),
+                color=alt.Color("direction:N", scale=color_scale, legend=None),
+            )
+            .properties(height=100)
+        )
+        st.altair_chart(volume_chart, width="stretch")
     else:
         st.info("株価データを取得できませんでした。")
 
