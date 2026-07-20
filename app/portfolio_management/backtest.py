@@ -211,3 +211,25 @@ def generate_backtest_explanation(
         DISCLAIMER_NOTICE,
     ]
     return "\n".join(sections)
+
+
+def run_universe_backtest_ranking(
+    prices_by_ticker: dict[str, pd.Series],
+    backtest_func,
+    preset_params: dict,
+    transaction_cost_pct: float = 0.0,
+    min_days: int = 0,
+) -> list[dict]:
+    rows = []
+    for ticker, prices in prices_by_ticker.items():
+        if len(prices) < min_days:
+            continue
+        result = backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **preset_params)
+        drawdown = abs(result["max_drawdown_pct"])
+        risk_adjusted_return = (
+            result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
+        )
+        rows.append(
+            {"ticker": ticker, **result, "risk_adjusted_return": round(risk_adjusted_return, 2)}
+        )
+    return sorted(rows, key=lambda row: row["risk_adjusted_return"], reverse=True)

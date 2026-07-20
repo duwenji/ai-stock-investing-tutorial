@@ -9,6 +9,7 @@ from portfolio_management.backtest import (
     run_ma_crossover_backtest,
     run_macd_crossover_backtest,
     run_rsi_reversal_backtest,
+    run_universe_backtest_ranking,
 )
 
 
@@ -239,3 +240,51 @@ def test_generate_backtest_explanation_uses_default_ma_strategy_when_presets_omi
     result = generate_backtest_explanation("AAA.T", prices, call_llm=fake_call_llm)
 
     assert "解説" in result
+
+
+def test_run_universe_backtest_ranking_sorts_by_risk_adjusted_return_and_skips_short_history():
+    dates3 = pd.date_range("2026-01-01", periods=3, freq="D")
+    dates1 = pd.date_range("2026-01-01", periods=1, freq="D")
+    prices_by_ticker = {
+        "AAA.T": pd.Series([20.0, 20.0, 20.0], index=dates3),
+        "BBB.T": pd.Series([60.0, 60.0, 60.0], index=dates3),
+        "CCC.T": pd.Series([999.0], index=dates1),
+    }
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        marker = float(prices.iloc[0])
+        return {
+            "total_return_pct": marker,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": -10.0,
+            "trade_days": 1,
+        }
+
+    result = run_universe_backtest_ranking(
+        prices_by_ticker, fake_backtest_func, preset_params={}, min_days=2
+    )
+
+    assert [row["ticker"] for row in result] == ["BBB.T", "AAA.T"]
+    assert result[0]["risk_adjusted_return"] == 6.0
+    assert result[1]["risk_adjusted_return"] == 2.0
+
+
+def test_run_universe_backtest_ranking_falls_back_to_total_return_when_drawdown_is_zero():
+    dates = pd.date_range("2026-01-01", periods=2, freq="D")
+    prices_by_ticker = {"AAA.T": pd.Series([10.0, 10.0], index=dates)}
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        return {
+            "total_return_pct": 15.0,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+        }
+
+    result = run_universe_backtest_ranking(
+        prices_by_ticker, fake_backtest_func, preset_params={}, min_days=1
+    )
+
+    assert result[0]["risk_adjusted_return"] == 15.0
