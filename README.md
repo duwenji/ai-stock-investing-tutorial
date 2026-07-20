@@ -13,6 +13,7 @@
 - クイック参照: [QUICK-REFERENCE.md](QUICK-REFERENCE.md)
 - 学習拡張計画: [ROADMAP.md](ROADMAP.md)
 - 免責事項: [DISCLAIMER.md](DISCLAIMER.md)
+- 発展版の実装例（完成版Streamlitアプリ）: [app/README.md](app/README.md)
 
 ---
 
