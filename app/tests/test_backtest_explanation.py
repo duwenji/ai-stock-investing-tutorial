@@ -22,3 +22,20 @@ def test_build_backtest_prompt_instructs_overfitting_and_no_directive_language()
     assert "取引コスト" in prompt
     assert "売買" in prompt
     assert "パラメータ" in prompt
+
+
+def test_build_backtest_prompt_uses_default_strategy_name_when_omitted():
+    comparison = {"標準(25/75)": {"total_return_pct": 18.4}}
+
+    prompt = build_backtest_prompt("7203.T", comparison)
+
+    assert "移動平均クロスオーバー戦略" in prompt
+
+
+def test_build_backtest_prompt_uses_given_strategy_name():
+    comparison = {"標準(14, 30/70)": {"total_return_pct": 5.0}}
+
+    prompt = build_backtest_prompt("7203.T", comparison, strategy_name="RSI逆張り")
+
+    assert "RSI逆張り戦略" in prompt
+    assert "移動平均クロスオーバー戦略" not in prompt

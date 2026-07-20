@@ -135,37 +135,68 @@ def run_bollinger_reversal_backtest(
     return _finalize_backtest(prices, position, transaction_cost_pct)
 
 
-BACKTEST_PRESETS: list[tuple[str, int, int]] = [
-    ("短期(5/25)", 5, 25),
-    ("標準(25/75)", 25, 75),
-]
+STRATEGIES: dict[str, dict] = {
+    "移動平均クロスオーバー": {
+        "func": run_ma_crossover_backtest,
+        "presets": [
+            ("標準(25/75)", {"short_window": 25, "long_window": 75}),
+            ("短期(5/25)", {"short_window": 5, "long_window": 25}),
+        ],
+        "min_days": 75,
+    },
+    "RSI逆張り": {
+        "func": run_rsi_reversal_backtest,
+        "presets": [
+            ("標準(14, 30/70)", {"period": 14, "oversold": 30, "overbought": 70}),
+            ("厳格(14, 20/80)", {"period": 14, "oversold": 20, "overbought": 80}),
+        ],
+        "min_days": 14,
+    },
+    "MACDクロスオーバー": {
+        "func": run_macd_crossover_backtest,
+        "presets": [
+            ("標準(12/26/9)", {"fast": 12, "slow": 26, "signal": 9}),
+            ("短期(5/13/5)", {"fast": 5, "slow": 13, "signal": 5}),
+        ],
+        "min_days": 26,
+    },
+    "ボリンジャーバンド逆張り": {
+        "func": run_bollinger_reversal_backtest,
+        "presets": [
+            ("標準(20, 2.0σ)", {"window": 20, "num_std": 2.0}),
+            ("タイト(20, 1.5σ)", {"window": 20, "num_std": 1.5}),
+        ],
+        "min_days": 20,
+    },
+}
 
 
 def run_backtest_comparison(
     prices: pd.Series,
-    presets: list[tuple[str, int, int]] = BACKTEST_PRESETS,
+    backtest_func,
+    presets: list[tuple[str, dict]],
     transaction_cost_pct: float = 0.0,
 ) -> dict[str, dict]:
     return {
-        label: run_ma_crossover_backtest(
-            prices,
-            short_window=short_window,
-            long_window=long_window,
-            transaction_cost_pct=transaction_cost_pct,
-        )
-        for label, short_window, long_window in presets
+        label: backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **params)
+        for label, params in presets
     }
 
 
 def generate_backtest_explanation(
     ticker: str,
     prices: pd.Series,
-    presets: list[tuple[str, int, int]] = BACKTEST_PRESETS,
+    backtest_func=run_ma_crossover_backtest,
+    strategy_name: str = "移動平均クロスオーバー",
+    presets: list[tuple[str, dict]] | None = None,
     transaction_cost_pct: float = 0.0,
     call_llm=default_call_llm,
 ) -> str:
-    comparison = run_backtest_comparison(prices, presets, transaction_cost_pct)
-    prompt = build_backtest_prompt(ticker, comparison)
+    if presets is None:
+        presets = STRATEGIES[strategy_name]["presets"]
+
+    comparison = run_backtest_comparison(prices, backtest_func, presets, transaction_cost_pct)
+    prompt = build_backtest_prompt(ticker, comparison, strategy_name)
     commentary = call_llm(prompt)
 
     sections = [

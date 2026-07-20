@@ -3,10 +3,12 @@ import json
 from common.disclaimer import DISCLAIMER_NOTICE
 
 
-def build_backtest_prompt(ticker: str, comparison: dict[str, dict]) -> str:
+def build_backtest_prompt(
+    ticker: str, comparison: dict[str, dict], strategy_name: str = "移動平均クロスオーバー"
+) -> str:
     comparison_json = json.dumps(comparison, ensure_ascii=False, indent=2, default=str)
     return (
-        "以下は移動平均クロスオーバー戦略のバックテスト結果です"
+        f"以下は{strategy_name}戦略のバックテスト結果です"
         "（Python側でパラメータ組ごとに計算済みのため再計算は不要です）。\n\n"
         f"【対象銘柄】{ticker}\n"
         f"【パラメータ組ごとの結果（JSON）】\n{comparison_json}\n\n"
