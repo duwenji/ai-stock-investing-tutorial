@@ -117,6 +117,16 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
                 "volume": price_history["volume"],
             }
         )
+        # 移動平均は表示範囲より前のデータも使って計算し、表示開始時点から
+        # 途切れなく描画できるようにする（price_historyは2年分取得済み）。
+        chart_df["ma5"] = chart_df["close"].rolling(window=5).mean()
+        chart_df["ma25"] = chart_df["close"].rolling(window=25).mean()
+        chart_df["ma75"] = chart_df["close"].rolling(window=75).mean()
+
+        # 移動平均の計算バッファ分を除き、直近6ヶ月のみを表示する
+        display_start = chart_df["date"].max() - pd.DateOffset(months=6)
+        chart_df = chart_df[chart_df["date"] >= display_start].reset_index(drop=True)
+
         # 陽線/陰線を色分けするため、始値と終値の大小関係から方向を判定する
         chart_df["direction"] = chart_df.apply(
             lambda row: "up" if row["close"] >= row["open"] else "down", axis=1
@@ -135,7 +145,28 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
             y2="close:Q",
             color=alt.Color("direction:N", scale=color_scale, legend=None),
         )
-        st.altair_chart((wick + body).properties(height=300), width="stretch")
+
+        ma_labels = {"ma5": "5日線", "ma25": "25日線", "ma75": "75日線"}
+        ma_df = (
+            chart_df.melt(
+                id_vars=["date"],
+                value_vars=list(ma_labels),
+                var_name="MA",
+                value_name="value",
+            )
+            .dropna(subset=["value"])
+            .replace({"MA": ma_labels})
+        )
+        ma_color_scale = alt.Scale(
+            domain=list(ma_labels.values()), range=["#1f77b4", "#ff7f0e", "#9467bd"]
+        )
+        ma_lines = alt.Chart(ma_df).mark_line(strokeWidth=1.5).encode(
+            x="date:T",
+            y="value:Q",
+            color=alt.Color("MA:N", scale=ma_color_scale, title="移動平均線"),
+        )
+
+        st.altair_chart((wick + body + ma_lines).properties(height=300), width="stretch")
 
         # 出来高は価格チャートの下に別チャートとして表示する
         volume_chart = (

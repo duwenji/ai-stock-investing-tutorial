@@ -39,7 +39,9 @@ def generate_stock_detail(
         if "open" in payload["price_history"]:
             return payload
 
-    history = fetch_price_history(ticker, period="6mo")
+    # 移動平均線（特に75日線）の計算バッファとして、表示に必要な6ヶ月分より
+    # 長めの2年分を取得する。
+    history = fetch_price_history(ticker, period="2y")
     fundamentals = analyze_fundamentals(ticker)
     technical = analyze_technical(history)
     news = fetch_news(ticker)

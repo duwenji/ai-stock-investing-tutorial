@@ -2,7 +2,7 @@
 
 [ai-stock-investing-tutorial](../README.md) の教材内容（プロンプト設計・データAPI連携・分析エージェント・ポートフォリオ管理）を統合した、実用のためのStreamlit Webアプリです。
 
-設計の詳細は [docs/superpowers/specs/2026-07-19-portfolio-screening-app-design.md](docs/superpowers/specs/2026-07-19-portfolio-screening-app-design.md) を参照してください。
+設計の詳細は [docs/app-design.md](docs/app-design.md) を参照してください。個別機能の意思決定の経緯は [docs/superpowers/specs/](docs/superpowers/specs/) 配下の各設計書を参照してください。
 
 > ⚠️ 本アプリは教育目的の参考実装であり、投資助言を目的としたものではありません。必ず [DISCLAIMER.md](../DISCLAIMER.md) をお読みください。
 

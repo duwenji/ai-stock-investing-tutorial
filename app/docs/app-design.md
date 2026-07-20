@@ -17,7 +17,7 @@
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | UI                 | Streamlit（`st.tabs` による5タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）                  |
 | データ処理         | pandas                                                                                                     |
-| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート、業種間相関ヒートマップ。streamlit経由の間接依存） |
+| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関ヒートマップ。streamlit経由の間接依存） |
 | 株価・ニュース取得 | yfinance                                                                                                   |
 | 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                      |
 | LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）            |
@@ -534,8 +534,8 @@ sequenceDiagram
     alt キャッシュあり かつ 新形式（price_historyに"open"キーを含む）
         Cache-->>Detail: payload をそのまま返す
     else キャッシュなし or 旧形式（close値のみのOHLCV拡張前の形式）
-        Detail->>PriceAPI: fetch_price_history(ticker, "6mo")
-        PriceAPI-->>Detail: 株価履歴（OHLCV）
+        Detail->>PriceAPI: fetch_price_history(ticker, "2y")
+        PriceAPI-->>Detail: 株価履歴（OHLCV、75日移動平均の計算バッファ込みで2年分）
         Detail->>Fund: analyze_fundamentals(ticker)
         Fund-->>Detail: PER/PBR/配当利回り
         Detail->>Tech: analyze_technical(history)
@@ -556,8 +556,8 @@ sequenceDiagram
 
 1. **キャッシュキー**: 他機能と異なり `"stock-detail-" + ticker` という**ハッシュ化しないキー**を使う（銘柄コードそのものをキーに含める）。当日日付とキー文字列でファイル名が決まる点は他機能と共通（[5.2](#52-キャッシュ機構) 参照）が、**「キャッシュを無視して再生成する」チェックボックスは存在しない**（他4つのキャッシュ利用機能と異なる点）。
 2. **旧形式キャッシュの扱い**: OHLCV対応前（終値のみを保存していた時期）のキャッシュには `price_history` に `"open"` キーが存在しないため、`"open" in payload["price_history"]` が偽の場合はキャッシュを無視して再取得・再生成する（ポートフォリオレビューの旧形式フォールバックと同種のパターン）。
-3. **データ取得**: 株価履歴（6ヶ月、OHLCV）・fundamentals・technical・newsを取得する。株価データが空の場合、チャートは描画せず `st.info("株価データを取得できませんでした。")` を表示するのみで、他の情報（fundamentals・technical・news・AIコメント）の表示は継続する。
-4. **チャート描画**: 取得したOHLCVから `direction`（陽線/陰線）列を作り、Altairでローソク足（`mark_rule` による高値-安値のヒゲ + `mark_bar` による始値-終値の実体）と出来高バーチャートを重ねて表示する（陽線 `#26a69a`／陰線 `#ef5350`）。
+3. **データ取得**: 株価履歴（OHLCV）・fundamentals・technical・newsを取得する。株価履歴は `fetch_price_history(ticker, "2y")` で**2年分**取得する（75日移動平均線の計算に必要なバッファを確保するため）。株価データが空の場合、チャートは描画せず `st.info("株価データを取得できませんでした。")` を表示するのみで、他の情報（fundamentals・technical・news・AIコメント）の表示は継続する。
+4. **チャート描画**: 取得したOHLCVから `direction`（陽線/陰線）列を作り、Altairでローソク足（`mark_rule` による高値-安値のヒゲ + `mark_bar` による始値-終値の実体）と出来高バーチャートを重ねて表示する（陽線 `#26a69a`／陰線 `#ef5350`）。ローソク足には5日/25日/75日の単純移動平均線（`chart_df["close"].rolling(window=N).mean()`）も重ね描画する（色は青/オレンジ/紫）。移動平均は2年分の取得データ全体で計算してから、表示範囲（直近6ヶ月）に絞り込むため、表示開始時点から途切れなく描画される。
 5. **AIコメント生成**: `build_stock_detail_prompt` は「PER/PBR/配当利回り/テクニカルシグナル/直近ニュース見出し」を渡し、断定的な売買判断を含めない3〜4文程度の総合分析コメントを1銘柄単位で生成する。他機能（ニュースセンチメント・スクリーニングコメント・ランキングコメント・セクターローテーションコメント）が複数対象を1回のプロンプトにまとめる「バッチ処理」なのに対し、本機能は**ダイアログを開くたびに単一銘柄分だけ**LLMを呼び出す点が異なる。
 6. **表示**: PER/PBR/配当利回りは `st.metric`、値が `None` の場合は「―」を表示する。関連ニュースが0件の場合は「ニュースが取得できませんでした。」と表示する。末尾に免責事項を表示する。
 
