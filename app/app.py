@@ -22,10 +22,12 @@ from portfolio_management.backtest import (
     STRATEGIES,
     generate_backtest_explanation,
     run_backtest_comparison,
+    run_universe_backtest_ranking,
 )
 from portfolio_management.review import generate_portfolio_review
 from portfolio_management.storage import load_holdings, save_holdings
 from portfolio_management.ticker_names import build_candidate_names
+from prompt_patterns.backtest_explanation import generate_ranking_comments
 from prompt_patterns.screening import (
     apply_filters,
     build_screening_prompt,
@@ -53,8 +55,8 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-tab_portfolio, tab_screening, tab_backtest = st.tabs(
-    ["ポートフォリオ", "スクリーニング", "バックテスト"]
+tab_portfolio, tab_screening, tab_backtest, tab_ranking = st.tabs(
+    ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト"]
 )
 
 with tab_portfolio:
@@ -316,3 +318,129 @@ with tab_backtest:
                 write_cache(CACHE_DIR, cache_key, explanation)
 
             st.markdown(explanation)
+
+with tab_ranking:
+    st.header("複数銘柄一括バックテスト・ランキング")
+    st.caption(
+        "主要銘柄（UNIVERSE）と保有銘柄を対象に、選択した戦略の標準プリセットで"
+        "バックテストし、リスク調整済みリターン（累積リターン÷|最大ドローダウン|）の高い順に並べます。"
+    )
+
+    ranking_strategy = st.selectbox(
+        "戦略", list(STRATEGIES.keys()), key="ranking_strategy"
+    )
+    ranking_period = st.selectbox(
+        "取得期間", ["1y", "3y", "5y"], index=1, key="ranking_period"
+    )
+    ranking_apply_cost = st.checkbox(
+        "取引コストを考慮する（1回あたり0.1%）", key="ranking_cost_checkbox"
+    )
+    ranking_force_regenerate = st.checkbox(
+        "キャッシュを無視して再生成する", key="ranking_force_regenerate"
+    )
+
+    if st.button("一括バックテストを実行"):
+        strategy = STRATEGIES[ranking_strategy]
+        transaction_cost_pct = 0.1 if ranking_apply_cost else 0.0
+
+        holdings = load_holdings(HOLDINGS_PATH)
+        holdings_tickers = [h["ticker"] for h in holdings if h.get("ticker")]
+        target_tickers = sorted(set(UNIVERSE) | set(holdings_tickers))
+
+        cache_key = "universe-backtest-" + hashlib.sha256(
+            f"{ranking_strategy}-{ranking_period}-{transaction_cost_pct}-"
+            f"{'-'.join(target_tickers)}".encode("utf-8")
+        ).hexdigest()[:12]
+        cached_payload = None if ranking_force_regenerate else read_cache(CACHE_DIR, cache_key)
+
+        payload = json.loads(cached_payload) if cached_payload is not None else None
+
+        if payload is None:
+            prices_by_ticker = {}
+            skipped_tickers = []
+            progress = st.progress(0.0, text="株価データを取得中...")
+            for i, ticker in enumerate(target_tickers):
+                try:
+                    history = fetch_price_history(ticker, period=ranking_period)
+                except Exception:
+                    skipped_tickers.append(ticker)
+                    history = None
+                if history is not None and not history.empty:
+                    prices_by_ticker[ticker] = history["Close"]
+                else:
+                    if ticker not in skipped_tickers:
+                        skipped_tickers.append(ticker)
+                progress.progress(
+                    (i + 1) / len(target_tickers),
+                    text=f"株価データを取得中... ({i + 1}/{len(target_tickers)})",
+                )
+            progress.empty()
+
+            if not prices_by_ticker:
+                st.error("バックテスト可能な銘柄がありませんでした。")
+                payload = None
+            else:
+                standard_label, standard_params = strategy["presets"][0]
+                ranking_rows = run_universe_backtest_ranking(
+                    prices_by_ticker,
+                    strategy["func"],
+                    standard_params,
+                    transaction_cost_pct=transaction_cost_pct,
+                    min_days=strategy["min_days"],
+                )
+                comments = generate_ranking_comments(ranking_rows[:5], call_llm=call_llm)
+                payload = {
+                    "ranking_rows": ranking_rows,
+                    "skipped_tickers": skipped_tickers,
+                    "comments": comments,
+                    "preset_label": standard_label,
+                }
+                write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+
+        if payload is not None:
+            candidate_names = build_candidate_names(
+                load_holdings(HOLDINGS_PATH), resolve_name=_cached_fetch_japanese_name
+            )
+            ranking_df = pd.DataFrame(payload["ranking_rows"])
+            ranking_df["name"] = ranking_df["ticker"].map(candidate_names).fillna("")
+            ranking_df.insert(0, "順位", range(1, len(ranking_df) + 1))
+            ranking_df = ranking_df[
+                [
+                    "順位",
+                    "ticker",
+                    "name",
+                    "total_return_pct",
+                    "benchmark_return_pct",
+                    "win_rate_pct",
+                    "max_drawdown_pct",
+                    "risk_adjusted_return",
+                ]
+            ]
+
+            st.subheader(f"{ranking_strategy}（{payload['preset_label']}）ランキング")
+            st.dataframe(
+                ranking_df,
+                column_config={
+                    "ticker": st.column_config.TextColumn("銘柄コード"),
+                    "name": st.column_config.TextColumn("銘柄名"),
+                    "total_return_pct": st.column_config.NumberColumn("累積リターン(%)"),
+                    "benchmark_return_pct": st.column_config.NumberColumn("ベンチマーク(%)"),
+                    "win_rate_pct": st.column_config.NumberColumn("勝率(%)"),
+                    "max_drawdown_pct": st.column_config.NumberColumn("最大DD(%)"),
+                    "risk_adjusted_return": st.column_config.NumberColumn("リスク調整済みリターン"),
+                },
+                hide_index=True,
+            )
+
+            if payload["skipped_tickers"]:
+                st.info(
+                    "データ取得・データ不足によりスキップした銘柄: "
+                    + ", ".join(payload["skipped_tickers"])
+                )
+
+            st.subheader("上位5銘柄のAIコメント")
+            for row in payload["ranking_rows"][:5]:
+                ticker = row["ticker"]
+                st.write(f"**{ticker}**: {payload['comments'].get(ticker, 'コメント生成失敗')}")
+
+            st.markdown(DISCLAIMER_NOTICE)
