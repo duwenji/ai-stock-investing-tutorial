@@ -1,6 +1,8 @@
 import json
 
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.json_parsing import strip_code_fence
+from data_api.llm_client import call_llm as default_call_llm
 
 
 def build_backtest_prompt(
@@ -25,3 +27,36 @@ def build_backtest_prompt(
         "今すぐ売買すべき」のような指示的な表現は使わないでください。\n\n"
         f"{DISCLAIMER_NOTICE}"
     )
+
+
+def build_ranking_comment_prompt(ranking_rows: list[dict]) -> str:
+    rows = [
+        {
+            "ticker": row["ticker"],
+            "total_return_pct": row["total_return_pct"],
+            "risk_adjusted_return": row["risk_adjusted_return"],
+        }
+        for row in ranking_rows
+    ]
+    rows_json = json.dumps(rows, ensure_ascii=False)
+    return (
+        "以下は複数銘柄のバックテスト結果ランキング（リスク調整済みリターン降順）です。"
+        "銘柄ごとに投資家向けの一言コメントを日本語で1文ずつ作成してください。"
+        "断定的な売買判断は含めないでください。\n"
+        '出力形式: {"<ticker>": "<コメント>"} というJSONのみを出力してください。\n\n'
+        f"{rows_json}"
+    )
+
+
+def generate_ranking_comments(
+    ranking_rows: list[dict], call_llm=default_call_llm
+) -> dict[str, str]:
+    if not ranking_rows:
+        return {}
+
+    prompt = build_ranking_comment_prompt(ranking_rows)
+    raw = call_llm(prompt)
+    try:
+        return json.loads(strip_code_fence(raw))
+    except json.JSONDecodeError:
+        return {row["ticker"]: "コメント生成失敗" for row in ranking_rows}

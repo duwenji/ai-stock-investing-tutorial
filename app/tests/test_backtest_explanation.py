@@ -1,5 +1,9 @@
 from common.disclaimer import DISCLAIMER_NOTICE
-from prompt_patterns.backtest_explanation import build_backtest_prompt
+from prompt_patterns.backtest_explanation import (
+    build_backtest_prompt,
+    build_ranking_comment_prompt,
+    generate_ranking_comments,
+)
 
 
 def test_build_backtest_prompt_includes_ticker_and_facts():
@@ -39,3 +43,38 @@ def test_build_backtest_prompt_uses_given_strategy_name():
 
     assert "RSI逆張り戦略" in prompt
     assert "移動平均クロスオーバー戦略" not in prompt
+
+
+def test_build_ranking_comment_prompt_includes_ticker_data_and_json_output_instruction():
+    ranking_rows = [{"ticker": "AAA.T", "total_return_pct": 20.0, "risk_adjusted_return": 6.0}]
+
+    prompt = build_ranking_comment_prompt(ranking_rows)
+
+    assert "AAA.T" in prompt
+    assert "20.0" in prompt
+    assert "6.0" in prompt
+
+
+def test_generate_ranking_comments_returns_empty_dict_for_empty_ranking():
+    assert generate_ranking_comments([]) == {}
+
+
+def test_generate_ranking_comments_parses_llm_json_response():
+    ranking_rows = [
+        {"ticker": "AAA.T", "total_return_pct": 20.0, "risk_adjusted_return": 6.0},
+        {"ticker": "BBB.T", "total_return_pct": 10.0, "risk_adjusted_return": 2.0},
+    ]
+    fake_call_llm = lambda prompt: '{"AAA.T": "好調でした。", "BBB.T": "堅調でした。"}'
+
+    result = generate_ranking_comments(ranking_rows, call_llm=fake_call_llm)
+
+    assert result == {"AAA.T": "好調でした。", "BBB.T": "堅調でした。"}
+
+
+def test_generate_ranking_comments_falls_back_on_invalid_json():
+    ranking_rows = [{"ticker": "AAA.T", "total_return_pct": 20.0, "risk_adjusted_return": 6.0}]
+    fake_call_llm = lambda prompt: "not json"
+
+    result = generate_ranking_comments(ranking_rows, call_llm=fake_call_llm)
+
+    assert result == {"AAA.T": "コメント生成失敗"}
