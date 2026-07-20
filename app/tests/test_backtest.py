@@ -1,6 +1,10 @@
 import pandas as pd
 
-from portfolio_management.backtest import run_ma_crossover_backtest
+from portfolio_management.backtest import (
+    BACKTEST_PRESETS,
+    run_backtest_comparison,
+    run_ma_crossover_backtest,
+)
 
 
 def test_run_ma_crossover_backtest_shifts_signal_to_avoid_lookahead_bias():
@@ -34,3 +38,26 @@ def test_run_ma_crossover_backtest_applies_transaction_cost_on_position_change()
     assert result["max_drawdown_pct"] == -0.1
     assert result["benchmark_return_pct"] == 2.0
     assert result["trade_days"] == 1
+
+
+def test_backtest_presets_are_short_and_standard():
+    assert BACKTEST_PRESETS == [
+        ("短期(5/25)", 5, 25),
+        ("標準(25/75)", 25, 75),
+    ]
+
+
+def test_run_backtest_comparison_returns_result_per_preset_label():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+
+    result = run_backtest_comparison(prices, presets=[("A", 1, 2), ("B", 1, 2)])
+
+    expected_single = {
+        "total_return_pct": 0.0,
+        "benchmark_return_pct": 2.0,
+        "win_rate_pct": 0.0,
+        "max_drawdown_pct": 0.0,
+        "trade_days": 1,
+    }
+    assert result == {"A": expected_single, "B": expected_single}

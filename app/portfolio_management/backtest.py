@@ -43,3 +43,25 @@ def run_ma_crossover_backtest(
         "max_drawdown_pct": round(max_drawdown * 100, 2),
         "trade_days": int(len(trade_days)),
     }
+
+
+BACKTEST_PRESETS: list[tuple[str, int, int]] = [
+    ("短期(5/25)", 5, 25),
+    ("標準(25/75)", 25, 75),
+]
+
+
+def run_backtest_comparison(
+    prices: pd.Series,
+    presets: list[tuple[str, int, int]] = BACKTEST_PRESETS,
+    transaction_cost_pct: float = 0.0,
+) -> dict[str, dict]:
+    return {
+        label: run_ma_crossover_backtest(
+            prices,
+            short_window=short_window,
+            long_window=long_window,
+            transaction_cost_pct=transaction_cost_pct,
+        )
+        for label, short_window, long_window in presets
+    }
