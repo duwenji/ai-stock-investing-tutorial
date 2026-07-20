@@ -265,12 +265,19 @@ with tab_screening:
     )
 
     if condition_text:
-        prompt = build_screening_prompt(condition_text)
-        raw_filters = call_llm(prompt)
-        filters = None
-        try:
-            filters = json.loads(strip_code_fence(raw_filters))
-        except json.JSONDecodeError:
+        if st.session_state.get("screening_condition_text") != condition_text:
+            prompt = build_screening_prompt(condition_text)
+            raw_filters = call_llm(prompt)
+            st.session_state["screening_condition_text"] = condition_text
+            try:
+                st.session_state["screening_filters"] = json.loads(strip_code_fence(raw_filters))
+                st.session_state["screening_filters_error"] = False
+            except json.JSONDecodeError:
+                st.session_state["screening_filters"] = None
+                st.session_state["screening_filters_error"] = True
+
+        filters = st.session_state.get("screening_filters")
+        if st.session_state.get("screening_filters_error"):
             st.error("条件の解釈に失敗しました。条件を言い換えて再度お試しください。")
 
         if filters is not None:
@@ -283,27 +290,43 @@ with tab_screening:
                     universe_df["name"]
                 )
                 result_df = apply_filters(universe_df, filters)
-
-                st.subheader(f"絞り込み結果（{len(result_df)}件）")
-                st.dataframe(
-                    result_df,
-                    column_config={
-                        "ticker": st.column_config.TextColumn("銘柄コード"),
-                        "name": st.column_config.TextColumn("銘柄名"),
-                        "per": st.column_config.NumberColumn("PER"),
-                        "pbr": st.column_config.NumberColumn("PBR"),
-                        "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
-                        "market_cap": st.column_config.NumberColumn("時価総額"),
-                    },
-                )
-
                 comments = generate_screening_comments(result_df, call_llm=call_llm)
-                st.subheader("銘柄ごとのAIコメント")
-                for row in result_df.itertuples():
-                    st.write(
-                        f"**{row.ticker} {row.name}**: "
-                        f"{comments.get(row.ticker, 'コメント生成失敗')}"
-                    )
+
+                st.session_state["screening_result_df"] = result_df
+                st.session_state["screening_comments"] = comments
+                st.session_state["screening_selected_row"] = None
+                st.session_state["screening_result_table"] = {
+                    "selection": {"rows": [], "columns": []}
+                }
+
+    if st.session_state.get("screening_result_df") is not None:
+        result_df = st.session_state["screening_result_df"]
+        comments = st.session_state["screening_comments"]
+
+        st.subheader(f"絞り込み結果（{len(result_df)}件）")
+        st.caption("行をクリックすると銘柄詳細を表示します。")
+        event = st.dataframe(
+            result_df,
+            column_config={
+                "ticker": st.column_config.TextColumn("銘柄コード"),
+                "name": st.column_config.TextColumn("銘柄名"),
+                "per": st.column_config.NumberColumn("PER"),
+                "pbr": st.column_config.NumberColumn("PBR"),
+                "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
+                "market_cap": st.column_config.NumberColumn("時価総額"),
+            },
+            on_select="rerun",
+            selection_mode="single-row",
+            key="screening_result_table",
+        )
+        _handle_table_selection("screening_selected_row", event, result_df)
+
+        st.subheader("銘柄ごとのAIコメント")
+        for row in result_df.itertuples():
+            st.write(
+                f"**{row.ticker} {row.name}**: "
+                f"{comments.get(row.ticker, 'コメント生成失敗')}"
+            )
 
 with tab_backtest:
     st.header("バックテスト")
