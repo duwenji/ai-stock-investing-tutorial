@@ -1,6 +1,6 @@
 # セクターローテーション UI説明強化 実装計画
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** セクターローテーションタブの各ウィジェット・セクションに`help`ツールチップと2つの`st.expander`による詳細解説を追加し、専門用語（コヒーレンス・周期帯・リード・ラグ等）の意味をユーザーが理解しやすくする。
 
@@ -29,7 +29,7 @@
 
 このタスクはUI文言（`help`引数・`st.expander`）の追加のみで、ロジック変更を伴わないため、既存方針（`app.py`は自動テスト対象外・手動確認）に従いTDDステップは適用しない。
 
-- [ ] **Step 1: 取得期間・キャッシュチェックボックス・分析実行ボタンに`help`を追加する**
+- [x] **Step 1: 取得期間・キャッシュチェックボックス・分析実行ボタンに`help`を追加する**
 
 現状（`app.py`）:
 ```python
@@ -73,7 +73,7 @@
     ):
 ```
 
-- [ ] **Step 2: 「業種間相関ヒートマップ」見出しに`help`を追加する**
+- [x] **Step 2: 「業種間相関ヒートマップ」見出しに`help`を追加する**
 
 現状:
 ```python
@@ -91,7 +91,7 @@
             )
 ```
 
-- [ ] **Step 3: 「リード・ラグ上位ペア」見出しに`help`を追加し、表の直後に「リード・ラグの読み方」expanderを追加する**
+- [x] **Step 3: 「リード・ラグ上位ペア」見出しに`help`を追加し、表の直後に「リード・ラグの読み方」expanderを追加する**
 
 現状:
 ```python
@@ -163,7 +163,7 @@
             )
 ```
 
-- [ ] **Step 4: 「ウェーブレット分析」見出しに`help`を追加し、caption直後に「ウェーブレット分析とは？」expanderを追加する**
+- [x] **Step 4: 「ウェーブレット分析」見出しに`help`を追加し、caption直後に「ウェーブレット分析とは？」expanderを追加する**
 
 現状:
 ```python
@@ -215,7 +215,7 @@
         sector_options = sorted(payload["sector_returns"].keys())
 ```
 
-- [ ] **Step 5: 業種A・業種Bのselectboxに`help`を追加する**
+- [x] **Step 5: 業種A・業種Bのselectboxに`help`を追加する**
 
 現状:
 ```python
@@ -261,7 +261,7 @@
                 )
 ```
 
-- [ ] **Step 6: 周期帯selectboxに`help`を追加する**
+- [x] **Step 6: 周期帯selectboxに`help`を追加する**
 
 現状:
 ```python
@@ -285,17 +285,17 @@
                 )
 ```
 
-- [ ] **Step 7: 構文チェックを行う**
+- [x] **Step 7: 構文チェックを行う**
 
 Run: `cd app && uv run python -c "import ast; ast.parse(open('app.py', encoding='utf-8').read())" && echo OK`
 Expected: `OK`が出力される（構文エラーがない）
 
-- [ ] **Step 8: 既存テストスイートを実行し、副作用がないことを確認する**
+- [x] **Step 8: 既存テストスイートを実行し、副作用がないことを確認する**
 
 Run: `cd app && uv run pytest -v`
 Expected: 全件PASS（`app.py`はテスト対象外のため件数に変化はない。117件PASSのはず）
 
-- [ ] **Step 9: Streamlitアプリで手動確認する**
+- [x] **Step 9: Streamlitアプリで手動確認する**
 
 Run: `cd app && uv run python -m streamlit run app.py --server.headless true`
 
@@ -308,7 +308,9 @@ Run: `cd app && uv run python -m streamlit run app.py --server.headless true`
 
 Expected: 上記すべてが問題なく表示・動作する
 
-- [ ] **Step 10: コミット**
+実施結果: `--server.headless true`で起動し、Playwright（Chromium）で実接続。ツールチップアイコン（`stTooltipHoverTarget`）が15個検出され、1つ目にホバーした際にポップアップ文言が正しく表示されることをスクリーンショットで確認した。「リード・ラグの読み方」「ウェーブレット分析とは？」の両expanderはクリックで開き、太字・箇条書きを含むMarkdownが崩れずレンダリングされた。`console --errors`相当のブラウザコンソール監視でエラーなし。
+
+- [x] **Step 10: コミット**
 
 ```bash
 cd app
@@ -320,8 +322,8 @@ git commit -m "docs: セクターローテーションタブにヘルプツー�
 
 ## Global Constraintsの確認（実装完了時のチェックリスト）
 
-- [ ] `sector_analysis/correlation.py`・`sector_analysis/wavelet.py`・`prompt_patterns/sector_rotation.py`に変更がないこと
-- [ ] `app.py`の`with tab_sector:`ブロック以外に変更がないこと
-- [ ] 新規の実行時依存が追加されていないこと（`pyproject.toml`に差分がないこと）
-- [ ] `uv run pytest`が全件PASSすること（117件）
-- [ ] Streamlitアプリでツールチップ・expanderが正しく表示・動作すること（Step 9で確認）
+- [x] `sector_analysis/correlation.py`・`sector_analysis/wavelet.py`・`prompt_patterns/sector_rotation.py`に変更がないこと
+- [x] `app.py`の`with tab_sector:`ブロック以外に変更がないこと
+- [x] 新規の実行時依存が追加されていないこと（`pyproject.toml`に差分がないこと）
+- [x] `uv run pytest`が全件PASSすること（117件）
+- [x] Streamlitアプリでツールチップ・expanderが正しく表示・動作すること（Step 9で確認）
