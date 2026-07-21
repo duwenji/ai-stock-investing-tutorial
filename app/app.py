@@ -46,6 +46,12 @@ from prompt_patterns.sector_rotation import generate_sector_rotation_comments
 from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
+from sector_analysis.wavelet import (
+    compute_cross_wavelet_lead_lag,
+    compute_dominant_lag_series,
+    deserialize_sector_returns,
+    serialize_sector_returns,
+)
 from stock_detail.detail import generate_stock_detail
 
 # 保有銘柄データやAPI取得結果のキャッシュを保存するディレクトリ構成
@@ -725,6 +731,9 @@ with tab_sector:
             None if sector_force_regenerate else read_cache(CACHE_DIR, cache_key)
         )
         payload = json.loads(cached_payload) if cached_payload is not None else None
+        if payload is not None and "sector_returns" not in payload:
+            # 旧スキーマのキャッシュ（sector_returns未保存）は再計算して移行する
+            payload = None
 
         if payload is None:
             skipped_tickers = []
@@ -759,6 +768,7 @@ with tab_sector:
                     "skipped_tickers": skipped_tickers,
                     "excluded_sectors": excluded_sectors,
                     "comments": comments,
+                    "sector_returns": serialize_sector_returns(sector_returns),
                 }
                 write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
@@ -829,6 +839,112 @@ with tab_sector:
                 )
         else:
             st.info("有効な業種ペアがありませんでした。")
+
+        st.subheader("ウェーブレット分析（時間変化するリード・ラグ）")
+        st.caption(
+            "選択した2つの業種について、値動きの周期の長さ（短期・中期・長期）ごとに、"
+            "どちらの業種がどれくらい先行しているかの時間変化を可視化します。"
+            "色が薄い部分は関係の確からしさ（コヒーレンス）が低いことを示します。"
+        )
+
+        sector_options = sorted(payload["sector_returns"].keys())
+        if len(sector_options) < 2:
+            st.info("ウェーブレット分析には2業種以上のデータが必要です。")
+        else:
+            default_x = pairs[0]["leading_sector"] if pairs else sector_options[0]
+            default_y = pairs[0]["lagging_sector"] if pairs else sector_options[1]
+            if default_x not in sector_options:
+                default_x = sector_options[0]
+            if default_y not in sector_options or default_y == default_x:
+                default_y = next(s for s in sector_options if s != default_x)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                sector_x = st.selectbox(
+                    "業種A",
+                    sector_options,
+                    index=sector_options.index(default_x),
+                    key="wavelet_sector_x",
+                )
+            with col_b:
+                sector_y = st.selectbox(
+                    "業種B",
+                    sector_options,
+                    index=sector_options.index(default_y),
+                    key="wavelet_sector_y",
+                )
+
+            if st.button("ウェーブレット分析を実行"):
+                all_series = deserialize_sector_returns(payload["sector_returns"])
+                try:
+                    wavelet_df = compute_cross_wavelet_lead_lag(
+                        all_series[sector_x], all_series[sector_y], sector_x, sector_y
+                    )
+                except Exception:
+                    st.error("ウェーブレット分析の計算に失敗しました。")
+                    wavelet_df = pd.DataFrame()
+
+                if wavelet_df.empty:
+                    st.warning(
+                        "選択した2業種の共通データが不足しているため、分析できませんでした。"
+                    )
+                    st.session_state["wavelet_result"] = None
+                else:
+                    st.session_state["wavelet_result"] = {
+                        "df": wavelet_df,
+                        "x": sector_x,
+                        "y": sector_y,
+                    }
+
+            wavelet_result = st.session_state.get("wavelet_result")
+            if wavelet_result is not None:
+                wavelet_df = wavelet_result["df"]
+
+                heatmap = (
+                    alt.Chart(wavelet_df)
+                    .mark_rect()
+                    .encode(
+                        x=alt.X("date:T", title=None),
+                        y=alt.Y("period_days:O", title="周期（営業日）", sort="descending"),
+                        color=alt.Color(
+                            "lag_days:Q",
+                            title=f"ラグ（正={wavelet_result['x']}が先行）",
+                            scale=alt.Scale(scheme="redblue", domainMid=0),
+                        ),
+                        opacity=alt.Opacity(
+                            "coherence:Q", scale=alt.Scale(domain=[0, 1], range=[0.05, 1])
+                        ),
+                        tooltip=[
+                            "date:T",
+                            "period_days:Q",
+                            "band:N",
+                            "coherence:Q",
+                            "lag_days:Q",
+                            "leading_sector:N",
+                        ],
+                    )
+                    .properties(height=400)
+                )
+                st.altair_chart(heatmap, width="stretch")
+
+                band = st.selectbox(
+                    "周期帯", ["短期", "中期", "長期"], index=1, key="wavelet_band"
+                )
+                band_df = wavelet_df[wavelet_df["band"] == band]
+                if band_df.empty:
+                    st.info("この周期帯には有効なデータがありませんでした。")
+                else:
+                    dominant = compute_dominant_lag_series(band_df)
+                    line = (
+                        alt.Chart(dominant)
+                        .mark_line()
+                        .encode(
+                            x=alt.X("date:T", title=None),
+                            y=alt.Y("dominant_lag_days:Q", title="支配的ラグ（日）"),
+                        )
+                        .properties(height=250)
+                    )
+                    st.altair_chart(line, width="stretch")
 
         if payload["skipped_tickers"]:
             st.info(
