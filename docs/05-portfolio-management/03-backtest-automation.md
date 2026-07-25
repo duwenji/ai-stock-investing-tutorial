@@ -18,12 +18,12 @@
 
 ## 位置づけ
 
-この教材は05-portfolio-managementカテゴリの最後の教材です。
+この教材は05-portfolio-managementカテゴリの3番目の教材です。
 01・02で学んだ「構成比の要約」「リスク指標の解説」に続き、
 本教材では「戦略の過去成績の解説」を扱います。
 
-次の06-real-world-examplesでは、ここまでの内容を統合した
-実践的なツール構築演習に取り組みます。
+次の04-lead-lag-correlation.mdでは、02で学んだ相関係数を
+時間差の視点に拡張します。
 
 ## 主要概念・パラメータ解説
 
@@ -202,4 +202,4 @@ if __name__ == "__main__":
 
 投資判断に関わる内容です。必ず [免責事項](../../DISCLAIMER.md) をご確認ください。
 
-[← 前へ: リスク評価・分散](02-risk-assessment.md) | [次へ: 06-real-world-examples →](../06-real-world-examples/00-README.md)
+[← 前へ: リスク評価・分散](02-risk-assessment.md) | [次へ: 相関とリード・ラグ分析の基礎 →](04-lead-lag-correlation.md)
