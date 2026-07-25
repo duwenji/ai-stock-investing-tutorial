@@ -43,6 +43,7 @@ from prompt_patterns.screening import (
     generate_screening_comments,
 )
 from prompt_patterns.sector_rotation import generate_sector_rotation_comments
+from prompt_patterns.wavelet_explanation import generate_wavelet_explanation
 from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
@@ -51,6 +52,7 @@ from sector_analysis.wavelet import (
     compute_dominant_lag_series,
     deserialize_sector_returns,
     serialize_sector_returns,
+    summarize_band_snapshot,
 )
 from stock_detail.detail import generate_stock_detail
 
@@ -1044,6 +1046,58 @@ with tab_sector:
                         .properties(height=250)
                     )
                     st.altair_chart(line, width="stretch")
+
+                    # 直近シグナルの要約パネル（機械的な数値表示、AI不使用）。
+                    # 周期帯セレクトボックスの変更ごとに自動的に追従する。
+                    snapshot = summarize_band_snapshot(band_df)
+                    if snapshot is not None:
+                        snap_lag = snapshot["dominant_lag_days"]
+                        snap_leading = sector_x if snap_lag >= 0 else sector_y
+                        snap_lagging = sector_y if snap_lag >= 0 else sector_x
+
+                        col_lag, col_coherence = st.columns(2)
+                        col_lag.metric("支配的ラグ（日）", f"{snap_lag:+.1f}")
+                        col_coherence.metric("コヒーレンス", f"{snapshot['avg_coherence']:.2f}")
+                        st.caption(
+                            f"直近（{snapshot['date'].strftime('%Y-%m-%d')}）時点: "
+                            f"{snap_leading} が {snap_lagging} に約{abs(snap_lag):.1f}営業日先行"
+                            f"（コヒーレンス {snapshot['avg_coherence']:.2f}）"
+                        )
+
+                        # AI解説コメント（明示的ボタン起動、日次ファイルキャッシュ）。
+                        # 表示中のペア・周期帯と異なる古いコメントを残さないよう、
+                        # session_stateには生成時のキーも一緒に保持し、一致時のみ表示する。
+                        wavelet_comment_key = (sector_x, sector_y, sector_period, band)
+                        wavelet_comment_force_regenerate = st.checkbox(
+                            "AI解説のキャッシュを無視して再生成する",
+                            key="wavelet_comment_force_regenerate",
+                        )
+                        if st.button("AI解説を生成", key="wavelet_comment_button"):
+                            comment_cache_key = "wavelet-comment-" + hashlib.sha256(
+                                "-".join(str(part) for part in wavelet_comment_key).encode(
+                                    "utf-8"
+                                )
+                            ).hexdigest()[:12]
+                            cached_comment = (
+                                None
+                                if wavelet_comment_force_regenerate
+                                else read_cache(CACHE_DIR, comment_cache_key)
+                            )
+                            if cached_comment is not None:
+                                wavelet_comment_text = cached_comment
+                            else:
+                                wavelet_comment_text = generate_wavelet_explanation(
+                                    sector_x, sector_y, band, snapshot, call_llm=call_llm
+                                )
+                                write_cache(CACHE_DIR, comment_cache_key, wavelet_comment_text)
+                            st.session_state["wavelet_comment"] = {
+                                "key": wavelet_comment_key,
+                                "text": wavelet_comment_text,
+                            }
+
+                        cached_state = st.session_state.get("wavelet_comment")
+                        if cached_state is not None and cached_state["key"] == wavelet_comment_key:
+                            st.markdown(cached_state["text"])
 
         if payload["skipped_tickers"]:
             st.info(
