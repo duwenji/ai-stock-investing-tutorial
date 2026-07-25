@@ -48,6 +48,10 @@ from prompt_patterns.wavelet_explanation import generate_wavelet_explanation
 from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
+from sector_analysis.display_settings import (
+    load_sector_display_settings,
+    save_sector_display_settings,
+)
 from sector_analysis.network import build_mermaid_lead_lag_graph
 from sector_analysis.wavelet import (
     compute_all_pairs_dominant_lag,
@@ -62,6 +66,7 @@ from stock_detail.detail import generate_stock_detail
 # 保有銘柄データやAPI取得結果のキャッシュを保存するディレクトリ構成
 DATA_DIR = Path(__file__).parent / "data"
 HOLDINGS_PATH = DATA_DIR / "holdings.json"
+SECTOR_DISPLAY_SETTINGS_PATH = DATA_DIR / "sector_display_settings.json"
 CACHE_DIR = DATA_DIR / "cache"
 
 
@@ -734,6 +739,43 @@ with tab_sector:
         "過去の株価データから計算します。あくまで過去の統計的傾向であり、"
         "将来の値動きを保証するものではありません。"
     )
+
+    display_settings = load_sector_display_settings(SECTOR_DISPLAY_SETTINGS_PATH)
+    with st.expander("表示設定"):
+        st.caption(
+            "チェックを外すとそのセクションを非表示にできます"
+            "（設定は次回起動時も保持されます）。"
+        )
+        new_display_settings = {
+            "heatmap": st.checkbox(
+                "業種間相関ヒートマップ",
+                value=display_settings["heatmap"],
+                key="sector_show_heatmap",
+            ),
+            "pairs_table": st.checkbox(
+                "リード・ラグ上位ペア",
+                value=display_settings["pairs_table"],
+                key="sector_show_pairs_table",
+            ),
+            "ai_comments": st.checkbox(
+                "相関上位5ペアのAIコメント",
+                value=display_settings["ai_comments"],
+                key="sector_show_ai_comments",
+            ),
+            "network_diagram": st.checkbox(
+                "業種間ネットワーク（全ペア俯瞰）",
+                value=display_settings["network_diagram"],
+                key="sector_show_network",
+            ),
+            "wavelet_analysis": st.checkbox(
+                "ウェーブレット分析",
+                value=display_settings["wavelet_analysis"],
+                key="sector_show_wavelet",
+            ),
+        }
+        if new_display_settings != display_settings:
+            save_sector_display_settings(SECTOR_DISPLAY_SETTINGS_PATH, new_display_settings)
+            display_settings = new_display_settings
 
     sector_period = st.selectbox(
         "取得期間",
