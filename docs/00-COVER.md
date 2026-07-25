@@ -32,8 +32,9 @@ STEP 3 ──→ Data & API（4教材）
 STEP 4 ──→ Analysis Agents（4教材）
              ファンダメンタル/テクニカル/ニュース分析エージェント・MCPサーバー構築
 
-STEP 5 ──→ Portfolio Management（3教材）
-             AIポートフォリオ分析・リスク評価・バックテスト自動化
+STEP 5 ──→ Portfolio Management（5教材）
+             AIポートフォリオ分析・リスク評価・バックテスト自動化・
+             リード/ラグ分析・周期分解（ウェーブレット、発展）
 
 STEP 6 ──→ Real World Examples（3教材）
              日次レポートツール・スクリーニングダッシュボード・統合アドバイザー構築演習
