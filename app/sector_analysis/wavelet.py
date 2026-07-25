@@ -131,11 +131,32 @@ def compute_cross_wavelet_lead_lag(
 def compute_dominant_lag_series(band_df: pd.DataFrame) -> pd.DataFrame:
     """特定周期帯のDataFrame（date, lag_days, coherenceを含む）から、
     日付ごとのコヒーレンス加重平均ラグを計算する。コヒーレンス合計が0の日付は除外する。
+
+    avg_coherenceは、その日付における対象バンド内の周期（スケール）方向の
+    コヒーレンス単純平均（重み付けなし）。dominant_lag_daysの重み付けとは
+    独立した「その日のバンド全体の確からしさ」の目安として扱う。
     """
     weighted = band_df.assign(_weighted_lag=band_df["lag_days"] * band_df["coherence"])
     agg = weighted.groupby("date").agg(
-        _weighted_sum=("_weighted_lag", "sum"), _weight_total=("coherence", "sum")
+        _weighted_sum=("_weighted_lag", "sum"),
+        _weight_total=("coherence", "sum"),
+        avg_coherence=("coherence", "mean"),
     )
     agg = agg[agg["_weight_total"] > 0]
     agg["dominant_lag_days"] = agg["_weighted_sum"] / agg["_weight_total"]
-    return agg.reset_index()[["date", "dominant_lag_days"]]
+    return agg.reset_index()[["date", "dominant_lag_days", "avg_coherence"]]
+
+
+def summarize_band_snapshot(band_df: pd.DataFrame) -> dict | None:
+    """特定周期帯のDataFrameから、直近日付における支配的ラグとバンド平均
+    コヒーレンスのスナップショットを返す。有効なデータがなければNoneを返す。
+    """
+    dominant = compute_dominant_lag_series(band_df)
+    if dominant.empty:
+        return None
+    last = dominant.iloc[-1]
+    return {
+        "date": last["date"],
+        "dominant_lag_days": float(last["dominant_lag_days"]),
+        "avg_coherence": float(last["avg_coherence"]),
+    }

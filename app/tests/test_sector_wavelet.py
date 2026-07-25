@@ -7,6 +7,7 @@ from sector_analysis.wavelet import (
     compute_dominant_lag_series,
     deserialize_sector_returns,
     serialize_sector_returns,
+    summarize_band_snapshot,
 )
 
 
@@ -81,6 +82,46 @@ def test_compute_dominant_lag_series_weights_by_coherence():
     result = compute_dominant_lag_series(band_df)
 
     assert list(result["dominant_lag_days"]) == [10.0, 5.0]
+
+
+def test_compute_dominant_lag_series_includes_avg_coherence():
+    dates = pd.date_range("2025-01-01", periods=2, freq="D")
+    band_df = pd.DataFrame(
+        {
+            "date": [dates[0], dates[0], dates[1], dates[1]],
+            "lag_days": [10.0, 0.0, 5.0, 5.0],
+            "coherence": [1.0, 0.0, 0.5, 0.3],
+        }
+    )
+
+    result = compute_dominant_lag_series(band_df)
+
+    assert list(result["avg_coherence"]) == [0.5, 0.4]
+
+
+def test_summarize_band_snapshot_returns_latest_snapshot():
+    dates = pd.date_range("2025-01-01", periods=2, freq="D")
+    band_df = pd.DataFrame(
+        {
+            "date": [dates[0], dates[0], dates[1], dates[1]],
+            "lag_days": [10.0, 0.0, 5.0, 5.0],
+            "coherence": [1.0, 0.0, 0.5, 0.3],
+        }
+    )
+
+    snapshot = summarize_band_snapshot(band_df)
+
+    assert snapshot == {
+        "date": dates[1],
+        "dominant_lag_days": 5.0,
+        "avg_coherence": 0.4,
+    }
+
+
+def test_summarize_band_snapshot_returns_none_for_empty_df():
+    band_df = pd.DataFrame(columns=["date", "lag_days", "coherence"])
+
+    assert summarize_band_snapshot(band_df) is None
 
 
 def test_serialize_deserialize_sector_returns_round_trip():
