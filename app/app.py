@@ -741,37 +741,73 @@ with tab_sector:
     )
 
     display_settings = load_sector_display_settings(SECTOR_DISPLAY_SETTINGS_PATH)
+    section_labels = {
+        "heatmap": "業種間相関ヒートマップ",
+        "pairs_table": "リード・ラグ上位ペア",
+        "ai_comments": "相関上位5ペアのAIコメント",
+        "network_diagram": "業種間ネットワーク（全ペア俯瞰）",
+        "wavelet_analysis": "ウェーブレット分析",
+    }
     with st.expander("表示設定"):
         st.caption(
-            "チェックを外すとそのセクションを非表示にできます"
+            "表示のON/OFFと並び順を指定できます"
             "（設定は次回起動時も保持されます）。"
         )
+        editor_df = pd.DataFrame(
+            [
+                {
+                    "key": key,
+                    "セクション": label,
+                    "表示": display_settings["visible"][key],
+                    "順序": display_settings["order"][key],
+                }
+                for key, label in section_labels.items()
+            ]
+        )
+        edited_df = st.data_editor(
+            editor_df,
+            column_config={
+                "key": None,
+                "セクション": st.column_config.TextColumn(disabled=True),
+                "表示": st.column_config.CheckboxColumn(),
+                "順序": st.column_config.NumberColumn(min_value=1, max_value=5, step=1),
+            },
+            hide_index=True,
+            key="sector_section_editor",
+        )
+        new_visible = {
+            key: bool(value) for key, value in zip(edited_df["key"], edited_df["表示"])
+        }
+        new_order = {
+            key: (
+                int(value)
+                if pd.notna(value)
+                else display_settings["order"][key]
+            )
+            for key, value in zip(edited_df["key"], edited_df["順序"])
+        }
+
+        new_height = dict(display_settings["height"])
+        height_specs = [
+            ("heatmap", "業種間相関ヒートマップの高さ (px)"),
+            ("network_diagram", "業種間ネットワークの高さ (px)"),
+            ("wavelet_analysis", "ウェーブレット分析ヒートマップの高さ (px)"),
+        ]
+        for key, label in height_specs:
+            if new_visible[key]:
+                new_height[key] = st.slider(
+                    label,
+                    250,
+                    900,
+                    display_settings["height"][key],
+                    50,
+                    key=f"sector_height_{key}",
+                )
+
         new_display_settings = {
-            "heatmap": st.checkbox(
-                "業種間相関ヒートマップ",
-                value=display_settings["heatmap"],
-                key="sector_show_heatmap",
-            ),
-            "pairs_table": st.checkbox(
-                "リード・ラグ上位ペア",
-                value=display_settings["pairs_table"],
-                key="sector_show_pairs_table",
-            ),
-            "ai_comments": st.checkbox(
-                "相関上位5ペアのAIコメント",
-                value=display_settings["ai_comments"],
-                key="sector_show_ai_comments",
-            ),
-            "network_diagram": st.checkbox(
-                "業種間ネットワーク（全ペア俯瞰）",
-                value=display_settings["network_diagram"],
-                key="sector_show_network",
-            ),
-            "wavelet_analysis": st.checkbox(
-                "ウェーブレット分析",
-                value=display_settings["wavelet_analysis"],
-                key="sector_show_wavelet",
-            ),
+            "visible": new_visible,
+            "order": new_order,
+            "height": new_height,
         }
         if new_display_settings != display_settings:
             save_sector_display_settings(SECTOR_DISPLAY_SETTINGS_PATH, new_display_settings)
