@@ -19,13 +19,22 @@ _OPERATORS = {
 }
 
 
-def build_screening_prompt(condition_text: str) -> str:
+def build_screening_prompt(condition_text: str, sectors: list[str] | None = None) -> str:
     # 自由記述の条件文をLLMに解釈させ、Python側で扱える構造化フィルタへ変換させる。
     # 使用可能なfieldを限定することで、存在しない列や不正な条件の生成を防ぐ。
+    sector_line = ""
+    if sectors:
+        sector_list = "、".join(sectors)
+        sector_line = (
+            "sector（業種）を使う場合、valueは次の業種名のいずれか一つを"
+            f"そのまま正確に使ってください（表記ゆれを吸収し、最も近いものを選ぶこと）: {sector_list}\n"
+        )
     return (
         "次の投資条件をJSON形式のフィルタ配列に変換してください。\n"
         "使用できるfieldは per（PER）、pbr（PBR）、dividend_yield_pct"
-        "（配当利回り、単位はパーセントの数値。例: 3%なら3）のいずれかです。\n"
+        "（配当利回り、単位はパーセントの数値。例: 3%なら3）、sector（業種）のいずれかです。\n"
+        f"{sector_line}"
+        'sectorのoperatorは"=="のみ使用してください。\n'
         '出力形式: [{"field": "per", "operator": "<=", "value": 15}] の'
         "ようなJSON配列のみを出力してください。説明文やコードブロック記法は不要です。\n\n"
         f"条件: {condition_text}"
@@ -43,7 +52,6 @@ def apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
         if field not in result.columns or op_symbol not in _OPERATORS:
             continue
         op_func = _OPERATORS[op_symbol]
-        # 欠損値（NaN）は比較対象から除外してから演算子を適用する。
         mask = result[field].notna() & op_func(result[field], value)
         result = result[mask]
     return result
@@ -51,7 +59,10 @@ def apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
 
 def build_comment_prompt(result_df: pd.DataFrame) -> str:
     # コメント生成に必要な列だけを渡し、余計な情報の混入やトークン消費を抑える。
-    rows = result_df[["ticker", "per", "dividend_yield_pct"]].to_dict(orient="records")
+    columns = ["ticker", "per", "dividend_yield_pct"]
+    if "sector" in result_df.columns:
+        columns.append("sector")
+    rows = result_df[columns].to_dict(orient="records")
     rows_json = json.dumps(rows, ensure_ascii=False)
     return (
         "以下の銘柄データを見て、銘柄ごとに投資家向けの一言コメントを"

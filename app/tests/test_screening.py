@@ -1,6 +1,10 @@
 import pandas as pd
 
-from prompt_patterns.screening import apply_filters, generate_screening_comments
+from prompt_patterns.screening import (
+    apply_filters,
+    build_screening_prompt,
+    generate_screening_comments,
+)
 
 
 def test_apply_filters_filters_rows_matching_all_conditions():
@@ -56,3 +60,31 @@ def test_generate_screening_comments_strips_code_fence():
     fake_call_llm = lambda prompt: '```json\n{"AAA": "割安感があります。"}\n```'
     result = generate_screening_comments(df, call_llm=fake_call_llm)
     assert result == {"AAA": "割安感があります。"}
+
+
+def test_apply_filters_matches_sector_equality():
+    df = pd.DataFrame(
+        [
+            {"ticker": "AAA", "sector": "自動車・輸送機"},
+            {"ticker": "BBB", "sector": "銀行"},
+        ]
+    )
+    filters = [{"field": "sector", "operator": "==", "value": "自動車・輸送機"}]
+    result = apply_filters(df, filters)
+    assert result["ticker"].tolist() == ["AAA"]
+
+
+def test_build_screening_prompt_includes_sector_list_when_given():
+    prompt = build_screening_prompt(
+        "自動車株でPERが低い銘柄", sectors=["自動車・輸送機", "銀行"]
+    )
+    assert "sector" in prompt
+    assert "自動車・輸送機" in prompt
+    assert "銀行" in prompt
+    assert "業種名のいずれか一つ" in prompt
+
+
+def test_build_screening_prompt_omits_sector_list_when_not_given():
+    prompt = build_screening_prompt("PERが15倍以下")
+    assert "sector" in prompt  # fieldとしての説明自体は常に含まれる
+    assert "業種名のいずれか一つ" not in prompt  # 業種一覧の案内文は含まれない
