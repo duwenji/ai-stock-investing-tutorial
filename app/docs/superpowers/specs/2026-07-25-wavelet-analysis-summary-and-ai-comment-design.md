@@ -146,12 +146,14 @@ if snapshot is not None:
 ### ② AI解説コメント（ボタン起動・日次キャッシュ）
 
 ```python
+wavelet_comment_key = (wavelet_result["x"], wavelet_result["y"], sector_period, band)
+
 wavelet_comment_force_regenerate = st.checkbox(
     "AI解説のキャッシュを無視して再生成する", key="wavelet_comment_force_regenerate"
 )
 if snapshot is not None and st.button("AI解説を生成", key="wavelet_comment_button"):
     comment_cache_key = "wavelet-comment-" + hashlib.sha256(
-        f"{wavelet_result['x']}-{wavelet_result['y']}-{sector_period}-{band}".encode("utf-8")
+        "-".join(str(part) for part in wavelet_comment_key).encode("utf-8")
     ).hexdigest()[:12]
     cached_comment = (
         None if wavelet_comment_force_regenerate else read_cache(CACHE_DIR, comment_cache_key)
@@ -163,14 +165,15 @@ if snapshot is not None and st.button("AI解説を生成", key="wavelet_comment_
             wavelet_result["x"], wavelet_result["y"], band, snapshot, call_llm=call_llm
         )
         write_cache(CACHE_DIR, comment_cache_key, comment)
-    st.session_state["wavelet_comment"] = comment
+    st.session_state["wavelet_comment"] = {"key": wavelet_comment_key, "text": comment}
 
-if st.session_state.get("wavelet_comment") is not None:
-    st.markdown(st.session_state["wavelet_comment"])
+cached_state = st.session_state.get("wavelet_comment")
+if cached_state is not None and cached_state["key"] == wavelet_comment_key:
+    st.markdown(cached_state["text"])
 ```
 
 - キャッシュキーは業種ペア・取得期間・周期帯のみに依存する（他タブと同じ日次ファイルキャッシュ方式。日付が変われば自動的に再生成対象になる）
-- 周期帯を切り替えても既存の `st.session_state["wavelet_comment"]` は自動更新されない（切替後は再度「AI解説を生成」を押す必要がある）。これはウェーブレット計算ボタン自体と同じ「明示的アクションのみ実行」方針であり、LLM呼び出しコストをセレクトボックス操作のたびに発生させないための意図的な設計
+- **表示中のペア・周期帯と一致する場合のみ**AIコメントを表示する（`cached_state["key"] == wavelet_comment_key`のガード）。業種ペアや周期帯を切り替えると、再度「AI解説を生成」を押すまでコメント欄は非表示に戻る。ボタン押下ごとにLLM呼び出しコストが発生する「明示的アクションのみ実行」方針を維持しつつ、切替後に古い選択に対するコメントが誤って表示され続ける状態を防ぐ
 - 個別の免責文は追加せず、タブ末尾の`DISCLAIMER_NOTICE`表示に委ねる（既存の「相関上位5ペアのAIコメント」等と同じ扱い）
 - `import hashlib`は既に`app.py`冒頭でインポート済み
 
