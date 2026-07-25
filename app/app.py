@@ -905,107 +905,108 @@ with tab_sector:
         payload = st.session_state["sector_payload"]
         pairs = payload["pairs"]
 
-        if pairs:
-            if display_settings["heatmap"]:
-                # 相関ペアの一覧から対称な相関行列（ヒートマップ用）を組み立てる
-                sectors = sorted(
-                    {pair["leading_sector"] for pair in pairs}
-                    | {pair["lagging_sector"] for pair in pairs}
-                )
-                corr_matrix = pd.DataFrame(1.0, index=sectors, columns=sectors)
-                for pair in pairs:
-                    a, b = pair["leading_sector"], pair["lagging_sector"]
-                    value = abs(pair["correlation"])
-                    corr_matrix.loc[a, b] = value
-                    corr_matrix.loc[b, a] = value
-
-                # Altairのheatmapはlong形式を要求するため、行列をmeltして変換する
-                heatmap_df = (
-                    corr_matrix.reset_index()
-                    .melt(id_vars="index", var_name="sector_b", value_name="correlation")
-                    .rename(columns={"index": "sector_a"})
-                )
-
-                st.subheader(
-                    "業種間相関ヒートマップ",
-                    help=(
-                        "17業種の組み合わせについて、最も強く連動するタイミング"
-                        "（リード・ラグ）における相関の強さを、色の濃さで示します。"
-                    ),
-                )
-                heatmap = (
-                    alt.Chart(heatmap_df)
-                    .mark_rect()
-                    .encode(
-                        x=alt.X("sector_a:N", title=None),
-                        y=alt.Y("sector_b:N", title=None),
-                        color=alt.Color(
-                            "correlation:Q", scale=alt.Scale(scheme="reds", domain=[0, 1])
-                        ),
-                        tooltip=["sector_a", "sector_b", "correlation"],
-                    )
-                    .properties(height=500)
-                )
-                st.altair_chart(heatmap, width="stretch")
-
-            if display_settings["pairs_table"]:
-                st.subheader(
-                    "リード・ラグ上位ペア",
-                    help=(
-                        "相関が強い順に、どちらの業種が何営業日先行して動く傾向が"
-                        "あったかを一覧表示します。"
-                    ),
-                )
-                pairs_df = pd.DataFrame(pairs)[
-                    ["leading_sector", "lagging_sector", "lag_days", "correlation"]
-                ]
-                st.dataframe(
-                    pairs_df,
-                    column_config={
-                        "leading_sector": st.column_config.TextColumn("先行業種"),
-                        "lagging_sector": st.column_config.TextColumn("追随業種"),
-                        "lag_days": st.column_config.NumberColumn("ラグ（営業日）"),
-                        "correlation": st.column_config.NumberColumn("相関係数"),
-                    },
-                    hide_index=True,
-                )
-
-                with st.expander("リード・ラグの読み方"):
-                    st.markdown(
-                        "「先行業種」の値動きに、「追随業種」が「ラグ（営業日）」で"
-                        "示した日数だけ遅れて追随する傾向が、指定した期間の株価データ"
-                        "から確認されたことを示します。\n\n"
-                        "例えば「先行業種: 建設・資材、追随業種: 機械、ラグ: 0日、"
-                        "相関係数: 0.87」であれば、建設・資材セクターの値動きと"
-                        "機械セクターの値動きが、同じ営業日にほぼ同じ方向へ動く傾向が"
-                        "強かったことを意味します。\n\n"
-                        "**注意:** 上位ペアの多くはラグ0日（同時相関）になりやすい"
-                        "傾向があります。これは業種固有の先行・追随関係というより、"
-                        "市場全体の地合い（同じ日に多くの業種が一緒に動く傾向）を"
-                        "反映している可能性があります。特定の周期の長さ"
-                        "（短期・中期・長期）ごとに、より業種固有の先行・追随関係を"
-                        "確認したい場合は、下部の「ウェーブレット分析」もあわせて"
-                        "ご覧ください。"
-                    )
-
-            if display_settings["ai_comments"]:
-                st.subheader(
-                    "相関上位5ペアのAIコメント",
-                    help=(
-                        "上記の上位5ペアについて、過去データ上の傾向をAIが解説した"
-                        "ものです。売買の推奨ではありません。"
-                    ),
-                )
-                for pair in pairs[:5]:
-                    key = f"{pair['leading_sector']}->{pair['lagging_sector']}"
-                    st.write(
-                        f"**{pair['leading_sector']} → {pair['lagging_sector']}**: "
-                        f"{payload['comments'].get(key, 'コメント生成失敗')}"
-                    )
-        else:
+        if not pairs:
             st.info("有効な業種ペアがありませんでした。")
 
-        if display_settings["network_diagram"]:
+        def _render_heatmap():
+            # 相関ペアの一覧から対称な相関行列（ヒートマップ用）を組み立てる
+            sectors = sorted(
+                {pair["leading_sector"] for pair in pairs}
+                | {pair["lagging_sector"] for pair in pairs}
+            )
+            corr_matrix = pd.DataFrame(1.0, index=sectors, columns=sectors)
+            for pair in pairs:
+                a, b = pair["leading_sector"], pair["lagging_sector"]
+                value = abs(pair["correlation"])
+                corr_matrix.loc[a, b] = value
+                corr_matrix.loc[b, a] = value
+
+            # Altairのheatmapはlong形式を要求するため、行列をmeltして変換する
+            heatmap_df = (
+                corr_matrix.reset_index()
+                .melt(id_vars="index", var_name="sector_b", value_name="correlation")
+                .rename(columns={"index": "sector_a"})
+            )
+
+            st.subheader(
+                "業種間相関ヒートマップ",
+                help=(
+                    "17業種の組み合わせについて、最も強く連動するタイミング"
+                    "（リード・ラグ）における相関の強さを、色の濃さで示します。"
+                ),
+            )
+            heatmap = (
+                alt.Chart(heatmap_df)
+                .mark_rect()
+                .encode(
+                    x=alt.X("sector_a:N", title=None),
+                    y=alt.Y("sector_b:N", title=None),
+                    color=alt.Color(
+                        "correlation:Q", scale=alt.Scale(scheme="reds", domain=[0, 1])
+                    ),
+                    tooltip=["sector_a", "sector_b", "correlation"],
+                )
+                .properties(height=display_settings["height"]["heatmap"])
+                .interactive()
+            )
+            st.altair_chart(heatmap, width="stretch")
+
+        def _render_pairs_table():
+            st.subheader(
+                "リード・ラグ上位ペア",
+                help=(
+                    "相関が強い順に、どちらの業種が何営業日先行して動く傾向が"
+                    "あったかを一覧表示します。"
+                ),
+            )
+            pairs_df = pd.DataFrame(pairs)[
+                ["leading_sector", "lagging_sector", "lag_days", "correlation"]
+            ]
+            st.dataframe(
+                pairs_df,
+                column_config={
+                    "leading_sector": st.column_config.TextColumn("先行業種"),
+                    "lagging_sector": st.column_config.TextColumn("追随業種"),
+                    "lag_days": st.column_config.NumberColumn("ラグ（営業日）"),
+                    "correlation": st.column_config.NumberColumn("相関係数"),
+                },
+                hide_index=True,
+            )
+
+            with st.expander("リード・ラグの読み方"):
+                st.markdown(
+                    "「先行業種」の値動きに、「追随業種」が「ラグ（営業日）」で"
+                    "示した日数だけ遅れて追随する傾向が、指定した期間の株価データ"
+                    "から確認されたことを示します。\n\n"
+                    "例えば「先行業種: 建設・資材、追随業種: 機械、ラグ: 0日、"
+                    "相関係数: 0.87」であれば、建設・資材セクターの値動きと"
+                    "機械セクターの値動きが、同じ営業日にほぼ同じ方向へ動く傾向が"
+                    "強かったことを意味します。\n\n"
+                    "**注意:** 上位ペアの多くはラグ0日（同時相関）になりやすい"
+                    "傾向があります。これは業種固有の先行・追随関係というより、"
+                    "市場全体の地合い（同じ日に多くの業種が一緒に動く傾向）を"
+                    "反映している可能性があります。特定の周期の長さ"
+                    "（短期・中期・長期）ごとに、より業種固有の先行・追随関係を"
+                    "確認したい場合は、下部の「ウェーブレット分析」もあわせて"
+                    "ご覧ください。"
+                )
+
+        def _render_ai_comments():
+            st.subheader(
+                "相関上位5ペアのAIコメント",
+                help=(
+                    "上記の上位5ペアについて、過去データ上の傾向をAIが解説した"
+                    "ものです。売買の推奨ではありません。"
+                ),
+            )
+            for pair in pairs[:5]:
+                key = f"{pair['leading_sector']}->{pair['lagging_sector']}"
+                st.write(
+                    f"**{pair['leading_sector']} → {pair['lagging_sector']}**: "
+                    f"{payload['comments'].get(key, 'コメント生成失敗')}"
+                )
+
+        def _render_network_diagram():
             st.subheader(
                 "業種間ネットワーク（全ペア俯瞰）",
                 help=(
@@ -1042,9 +1043,11 @@ with tab_sector:
                     "十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。"
                 )
             else:
-                _render_mermaid(mermaid_code)
+                _render_mermaid(
+                    mermaid_code, height=display_settings["height"]["network_diagram"]
+                )
 
-        if display_settings["wavelet_analysis"]:
+        def _render_wavelet_analysis():
             st.subheader(
                 "ウェーブレット分析（時間変化するリード・ラグ）",
                 help="時間の経過とともに変化する、業種間の先行・追随関係を可視化します。",
@@ -1142,7 +1145,9 @@ with tab_sector:
                         .mark_rect()
                         .encode(
                             x=alt.X("date:T", title=None),
-                            y=alt.Y("period_days:O", title="周期（営業日）", sort="descending"),
+                            y=alt.Y(
+                                "period_days:O", title="周期（営業日）", sort="descending"
+                            ),
                             color=alt.Color(
                                 "lag_days:Q",
                                 title=f"ラグ（正={wavelet_result['x']}が先行）",
@@ -1160,7 +1165,8 @@ with tab_sector:
                                 "leading_sector:N",
                             ],
                         )
-                        .properties(height=400)
+                        .properties(height=display_settings["height"]["wavelet_analysis"])
+                        .interactive()
                     )
                     st.altair_chart(heatmap, width="stretch")
 
@@ -1188,6 +1194,7 @@ with tab_sector:
                                 y=alt.Y("dominant_lag_days:Q", title="支配的ラグ（日）"),
                             )
                             .properties(height=250)
+                            .interactive()
                         )
                         st.altair_chart(line, width="stretch")
 
@@ -1201,7 +1208,9 @@ with tab_sector:
 
                             col_lag, col_coherence = st.columns(2)
                             col_lag.metric("支配的ラグ（日）", f"{snap_lag:+.1f}")
-                            col_coherence.metric("コヒーレンス", f"{snapshot['avg_coherence']:.2f}")
+                            col_coherence.metric(
+                                "コヒーレンス", f"{snapshot['avg_coherence']:.2f}"
+                            )
                             st.caption(
                                 f"直近（{snapshot['date'].strftime('%Y-%m-%d')}）時点: "
                                 f"{snap_leading} が {snap_lagging} に約{abs(snap_lag):.1f}営業日先行"
@@ -1218,9 +1227,9 @@ with tab_sector:
                             )
                             if st.button("AI解説を生成", key="wavelet_comment_button"):
                                 comment_cache_key = "wavelet-comment-" + hashlib.sha256(
-                                    "-".join(str(part) for part in wavelet_comment_key).encode(
-                                        "utf-8"
-                                    )
+                                    "-".join(
+                                        str(part) for part in wavelet_comment_key
+                                    ).encode("utf-8")
                                 ).hexdigest()[:12]
                                 cached_comment = (
                                     None
@@ -1233,15 +1242,36 @@ with tab_sector:
                                     wavelet_comment_text = generate_wavelet_explanation(
                                         sector_x, sector_y, band, snapshot, call_llm=call_llm
                                     )
-                                    write_cache(CACHE_DIR, comment_cache_key, wavelet_comment_text)
+                                    write_cache(
+                                        CACHE_DIR, comment_cache_key, wavelet_comment_text
+                                    )
                                 st.session_state["wavelet_comment"] = {
                                     "key": wavelet_comment_key,
                                     "text": wavelet_comment_text,
                                 }
 
                             cached_state = st.session_state.get("wavelet_comment")
-                            if cached_state is not None and cached_state["key"] == wavelet_comment_key:
+                            if (
+                                cached_state is not None
+                                and cached_state["key"] == wavelet_comment_key
+                            ):
                                 st.markdown(cached_state["text"])
+
+        section_renderers = {
+            "heatmap": _render_heatmap,
+            "pairs_table": _render_pairs_table,
+            "ai_comments": _render_ai_comments,
+            "network_diagram": _render_network_diagram,
+            "wavelet_analysis": _render_wavelet_analysis,
+        }
+        ordered_keys = sorted(
+            section_renderers, key=lambda k: display_settings["order"][k]
+        )
+        for key in ordered_keys:
+            if key in ("heatmap", "pairs_table", "ai_comments") and not pairs:
+                continue
+            if display_settings["visible"][key]:
+                section_renderers[key]()
 
         if payload["skipped_tickers"]:
             st.info(
