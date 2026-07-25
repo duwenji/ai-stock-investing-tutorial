@@ -1,5 +1,8 @@
 # 複数銘柄のデータ取得・LLM呼び出しなどをスレッド並列で実行するための共通ユーティリティ。
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 
 def map_concurrently(items: list, fn, max_workers: int = 8) -> dict:
@@ -12,9 +15,18 @@ def map_concurrently(items: list, fn, max_workers: int = 8) -> dict:
         return {}
 
     results = {}
+    # ワーカースレッドには呼び出し元のScriptRunContextが引き継がれず、fn内で
+    # st.cache_data等を呼ぶと "missing ScriptRunContext" 警告が出るため明示的に伝播させる。
+    ctx = get_script_run_ctx()
+
+    def _run(item):
+        if ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)
+        return fn(item)
+
     # ワーカー数はitems数を超えないようにし、少数アイテム時に無駄なスレッドを立てない。
     with ThreadPoolExecutor(max_workers=min(max_workers, len(items))) as executor:
-        future_to_item = {executor.submit(fn, item): item for item in items}
+        future_to_item = {executor.submit(_run, item): item for item in items}
         for future in as_completed(future_to_item):
             item = future_to_item[future]
             try:
