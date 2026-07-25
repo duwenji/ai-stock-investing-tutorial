@@ -115,12 +115,25 @@ def _render_mermaid(code: str, height: int = 400) -> None:
       mermaid.run({{ querySelector: ".mermaid" }}).then(function () {{
         var svgEl = document.querySelector(".mermaid svg");
         if (svgEl) {{
-          svgPanZoom(svgEl, {{
+          var pz = svgPanZoom(svgEl, {{
             zoomEnabled: true,
             controlIconsEnabled: true,
-            fit: true,
+            fit: false,
             center: true,
           }});
+          // 業種間ネットワーク図はflowchart LRのため横に広がりやすく、
+          // 単純なfit（縦横とも収まる最大倍率）だと幅で頭打ちになり、
+          // 高さを増やしても余白が増えるだけになる。縦方向を優先して
+          // 拡大しつつ、疎な（ノードが少ない）図で拡大しすぎないよう
+          // 「全体表示時の倍率の2倍」を上限にする。はみ出した部分は
+          // ドラッグ・ホイールで閲覧できる。
+          var sizes = pz.getSizes();
+          if (sizes.viewBox.height > 0 && sizes.viewBox.width > 0) {{
+            var scaleToHeight = sizes.height / sizes.viewBox.height;
+            var scaleToWidth = sizes.width / sizes.viewBox.width;
+            pz.zoom(Math.min(scaleToHeight, scaleToWidth * 2));
+            pz.center();
+          }}
         }}
       }});
     </script>
