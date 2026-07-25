@@ -95,11 +95,26 @@ def _cached_fetch_news(ticker: str) -> list[dict]:
 
 
 def _render_mermaid(code: str, height: int = 400) -> None:
-    """Mermaidコード文字列を、CDN経由のmermaid.jsを使ってHTML埋め込みで描画する。"""
+    """Mermaidコード文字列を、CDN経由のmermaid.js + svg-pan-zoom.jsを使って
+    ドラッグパン・ホイールズーム可能なHTML埋め込みとして描画する。"""
     html = f"""
     <div class="mermaid">{code}</div>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script>mermaid.initialize({{ startOnLoad: true }});</script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3/dist/svg-pan-zoom.min.js"></script>
+    <script>
+      mermaid.initialize({{ startOnLoad: false }});
+      mermaid.run({{ querySelector: ".mermaid" }}).then(function () {{
+        var svgEl = document.querySelector(".mermaid svg");
+        if (svgEl) {{
+          svgPanZoom(svgEl, {{
+            zoomEnabled: true,
+            controlIconsEnabled: true,
+            fit: true,
+            center: true,
+          }});
+        }}
+      }});
+    </script>
     """
     components.html(html, height=height, scrolling=True)
 
