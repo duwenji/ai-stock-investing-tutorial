@@ -98,6 +98,15 @@ def _render_mermaid(code: str, height: int = 400) -> None:
     """Mermaidコード文字列を、CDN経由のmermaid.js + svg-pan-zoom.jsを使って
     ドラッグパン・ホイールズーム可能なHTML埋め込みとして描画する。"""
     html = f"""
+    <style>
+      html, body {{ margin: 0; padding: 0; height: 100%; }}
+      .mermaid {{ width: 100%; height: 100%; }}
+      .mermaid svg {{
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+      }}
+    </style>
     <div class="mermaid">{code}</div>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3/dist/svg-pan-zoom.min.js"></script>
