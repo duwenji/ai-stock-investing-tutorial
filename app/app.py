@@ -813,32 +813,37 @@ with tab_sector:
             save_sector_display_settings(SECTOR_DISPLAY_SETTINGS_PATH, new_display_settings)
             display_settings = new_display_settings
 
-    sector_period = st.selectbox(
-        "取得期間",
-        ["6mo", "1y", "2y"],
-        index=1,
-        key="sector_period",
-        help=(
-            "株価データを取得する期間です。長いほど長期の周期（サイクル）分析の"
-            "精度が上がりますが、取得に時間がかかります。"
-        ),
-    )
-    sector_force_regenerate = st.checkbox(
-        "キャッシュを無視して再生成する",
-        key="sector_force_regenerate",
-        help=(
-            "前回と同じ期間で分析済みの場合、通常は保存済みの結果を再利用します。"
-            "最新データで計算し直したいときにチェックしてください。"
-        ),
-    )
+    col_period, col_regen, col_run = st.columns(3)
+    with col_period:
+        sector_period = st.selectbox(
+            "取得期間",
+            ["6mo", "1y", "2y"],
+            index=1,
+            key="sector_period",
+            help=(
+                "株価データを取得する期間です。長いほど長期の周期（サイクル）分析の"
+                "精度が上がりますが、取得に時間がかかります。"
+            ),
+        )
+    with col_regen:
+        sector_force_regenerate = st.checkbox(
+            "キャッシュを無視して再生成する",
+            key="sector_force_regenerate",
+            help=(
+                "前回と同じ期間で分析済みの場合、通常は保存済みの結果を再利用します。"
+                "最新データで計算し直したいときにチェックしてください。"
+            ),
+        )
+    with col_run:
+        run_clicked = st.button(
+            "分析を実行",
+            help=(
+                "初回実行時は228銘柄のデータ取得のため30秒程度かかります"
+                "（2回目以降はキャッシュにより高速です）。"
+            ),
+        )
 
-    if st.button(
-        "分析を実行",
-        help=(
-            "初回実行時は228銘柄のデータ取得のため30秒程度かかります"
-            "（2回目以降はキャッシュにより高速です）。"
-        ),
-    ):
+    if run_clicked:
         # 取得期間と対象ユニバースが同一なら分析結果をキャッシュから再利用する
         cache_key = "sector-rotation-" + hashlib.sha256(
             f"{sector_period}-{'-'.join(sorted(UNIVERSE))}".encode("utf-8")
