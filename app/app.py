@@ -485,7 +485,9 @@ with tab_screening:
         # 入力条件が前回から変わった場合のみLLMを呼び出し、自然言語条件を
         # 構造化フィルタ（JSON）に変換する。変わっていなければ結果をセッションから再利用する
         if st.session_state.get("screening_condition_text") != condition_text:
-            prompt = build_screening_prompt(condition_text)
+            prompt = build_screening_prompt(
+                condition_text, sectors=sorted(set(SECTOR_MAP.values()))
+            )
             raw_filters = call_llm(prompt)
             st.session_state["screening_condition_text"] = condition_text
             try:
@@ -511,6 +513,7 @@ with tab_screening:
                 universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                     universe_df["name"]
                 )
+                universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
                 result_df = apply_filters(universe_df, filters)
                 comments = generate_screening_comments(result_df, call_llm=call_llm)
 
@@ -533,6 +536,7 @@ with tab_screening:
             column_config={
                 "ticker": st.column_config.TextColumn("銘柄コード"),
                 "name": st.column_config.TextColumn("銘柄名"),
+                "sector": st.column_config.TextColumn("業種"),
                 "per": st.column_config.NumberColumn("PER"),
                 "pbr": st.column_config.NumberColumn("PBR"),
                 "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
