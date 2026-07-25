@@ -6,11 +6,11 @@
 
 **Architecture:** `sector_analysis/wavelet.py`に全ペア一括計算・集約を行う純粋関数`compute_all_pairs_dominant_lag`を追加する。新規モジュール`sector_analysis/network.py`に、集約結果からMermaid定義文字列を生成する純粋関数`build_mermaid_lead_lag_graph`を実装する。`app.py`のセクターローテーションタブの「分析を実行」フローに全ペア一括計算を統合し、既存の相関ヒートマップ・AIコメントセクションの直後、既存の2業種選択ウェーブレット・ドリルダウンの直前に新UIセクションを追加する。既存の相関ベースの分析・2業種ドリルダウン・AI解説機能は変更しない。
 
-**Tech Stack:** Python 3.14, pandas, numpy, pywt (既存)、streamlit-mermaid (新規依存)、altair, pytest, uv
+**Tech Stack:** Python 3.14, pandas, numpy, pywt (既存)、altair (既存、6.x維持)、mermaid.js (CDN読み込み、pip依存なし)、pytest, uv
 
 ## Global Constraints
 
-- 新規の実行時依存は`streamlit-mermaid`のみ追加する（`pywavelets`は既存依存のまま）
+- 新規のpip依存は追加しない（`streamlit-mermaid`は`altair<5`を要求し既存の全Altairチャート機能に影響するため不採用。Mermaidは`st.components.v1.html` + mermaid.js CDN読み込みで描画する）
 - Mermaidグラフのエッジクリックによる既存2業種ドリルダウンへの選択自動反映は実装しない
 - 個別ペアの統計的有意性検定は実装しない
 - 周期帯をまたいだ統合表示は実装しない（短期/中期/長期を切り替え表示する）
@@ -465,25 +465,17 @@ git commit -m "feat: 業種間リード・ラグ関係をMermaidグラフとし�
 ### Task 3: `app.py` — 全ペア一括計算の統合とUIセクション追加
 
 **Files:**
-- Modify: `pyproject.toml`（`streamlit-mermaid`依存追加）
 - Modify: `app.py`
 
 **Interfaces:**
-- Consumes: `sector_analysis.wavelet.compute_all_pairs_dominant_lag`（Task 1）、`sector_analysis.network.build_mermaid_lead_lag_graph`（Task 2）、`streamlit_mermaid.st_mermaid`、既存の`sector_returns`（ローカル変数）・`pairs`・`payload`・`CACHE_DIR`・`read_cache`/`write_cache`
-- Produces: なし（UIセクションの追加のみ）
+- Consumes: `sector_analysis.wavelet.compute_all_pairs_dominant_lag`（Task 1）、`sector_analysis.network.build_mermaid_lead_lag_graph`（Task 2）、既存の`sector_returns`（ローカル変数）・`pairs`・`payload`・`CACHE_DIR`・`read_cache`/`write_cache`
+- Produces: `_render_mermaid(code: str, height: int = 400) -> None`（`app.py`内のヘルパー関数、他タスクからは利用されない）
 
 このタスクはUI配線のみのため、既存方針（`app.py`はロジックを持たせず薄い呼び出しに留め、自動テスト対象外・手動確認）に従いTDDステップは適用しない。Task 4で手動確認する。
 
-- [ ] **Step 1: 新規依存`streamlit-mermaid`を追加する**
+> **設計変更の経緯:** 当初`streamlit-mermaid`パッケージを新規依存として追加する計画だったが、実装時に同パッケージが`altair<5`を要求し、`uv add`実行により既存の全Altairチャート機能（相関ヒートマップ・ウェーブレットヒートマップ・ローソク足チャート等、`altair>=6`前提）が`altair`6.2.2→4.2.2へ強制ダウングレードされることが判明した。既存機能への影響リスクを避けるため、新規pip依存を追加しない`st.components.v1.html` + mermaid.js（CDN読み込み）方式に変更した。設計書（`docs/superpowers/specs/2026-07-25-sector-network-mermaid-design.md`）も合わせて更新済み。
 
-```bash
-cd app
-uv add streamlit-mermaid
-```
-
-Expected: `pyproject.toml`の`dependencies`に`"streamlit-mermaid>=..."`（実際に解決されたバージョン）が追加され、`uv.lock`が更新される。
-
-- [ ] **Step 2: importを追加する**
+- [ ] **Step 1: importとMermaid描画ヘルパーを追加する**
 
 `app.py`の`from sector_analysis.wavelet import (...)`ブロック（現状51〜56行目付近）を以下に変更する:
 
@@ -511,9 +503,26 @@ from sector_analysis.wavelet import (
 )
 ```
 
-さらに、`from streamlit_mermaid import st_mermaid`を`import streamlit as st`の直後に追加する。
+さらに、`import streamlit as st`の直後に以下を追加する:
 
-- [ ] **Step 3: キャッシュ読み込み時のスキーマ移行チェックを拡張する**
+```python
+import streamlit.components.v1 as components
+```
+
+`CACHE_DIR = ...`より前の適切な位置（他のモジュールレベル定数・ヘルパー関数と同様の場所）に、Mermaid描画ヘルパー関数を追加する:
+
+```python
+def _render_mermaid(code: str, height: int = 400) -> None:
+    """Mermaidコード文字列を、CDN経由のmermaid.jsを使ってHTML埋め込みで描画する。"""
+    html = f"""
+    <div class="mermaid">{code}</div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({{ startOnLoad: true }});</script>
+    """
+    components.html(html, height=height, scrolling=True)
+```
+
+- [ ] **Step 2: キャッシュ読み込み時のスキーマ移行チェックを拡張する**
 
 現状（`app.py:759-761`付近）:
 ```python
@@ -531,7 +540,7 @@ from sector_analysis.wavelet import (
             payload = None
 ```
 
-- [ ] **Step 4: 全ペア一括計算をpayloadに追加する**
+- [ ] **Step 3: 全ペア一括計算をpayloadに追加する**
 
 現状（`app.py:785-798`付近）:
 ```python
@@ -572,7 +581,7 @@ from sector_analysis.wavelet import (
                 write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 ```
 
-- [ ] **Step 5: 新UIセクション「業種間ネットワーク（全ペア俯瞰）」を追加する**
+- [ ] **Step 4: 新UIセクション「業種間ネットワーク（全ペア俯瞰）」を追加する**
 
 既存の、相関ペアの`if pairs: ... else: st.info("有効な業種ペアがありませんでした。")`ブロックの直後・既存の`st.subheader("ウェーブレット分析（時間変化するリード・ラグ）", ...)`の直前（`app.py:901-904`付近）に、以下を挿入する:
 
@@ -626,22 +635,22 @@ from sector_analysis.wavelet import (
                 "十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。"
             )
         else:
-            st_mermaid(mermaid_code)
+            _render_mermaid(mermaid_code)
 
         st.subheader(
             "ウェーブレット分析（時間変化するリード・ラグ）",
 ```
 
-- [ ] **Step 6: 既存テストスイートを実行し、副作用がないことを確認する**
+- [ ] **Step 5: 既存テストスイートを実行し、副作用がないことを確認する**
 
 Run: `cd app && uv run pytest -v`
 Expected: 全件PASS（`app.py`はテスト対象外のため件数に変化はない）
 
-- [ ] **Step 7: コミット**
+- [ ] **Step 6: コミット**
 
 ```bash
 cd app
-git add pyproject.toml uv.lock app.py
+git add app.py
 git commit -m "feat: セクターローテーションタブに業種間ネットワーク（全ペア俯瞰・Mermaid）セクションを追加"
 ```
 
@@ -655,7 +664,7 @@ git commit -m "feat: セクターローテーションタブに業種間ネッ�
 - Consumes: Task 1〜3で実装した一式
 - Produces: なし（確認結果をこのタスクの完了条件とする）
 
-- [ ] **Step 1: アプリを起動し、セクターローテーションタブで分析を実行する**
+- [x] **Step 1: アプリを起動し、セクターローテーションタブで分析を実行する**
 
 Run: `cd app && uv run python -m streamlit run app.py`
 
@@ -666,7 +675,9 @@ Run: `cd app && uv run python -m streamlit run app.py`
 
 Expected: エラーなく表示される
 
-- [ ] **Step 2: 周期帯・閾値の操作を確認する**
+実施結果: `--server.headless true`で起動し、Playwright（Chromium、`npx playwright install chromium`で取得）をNode.jsスクリプトから操作して実接続。「キャッシュを無視して再生成する」をチェックして「分析を実行」をクリックし、228銘柄取得＋相関計算＋136ペアのウェーブレット一括計算＋AIコメント生成（実際にClaude CLIを呼び出し）の完了後、「業種間ネットワーク（全ペア俯瞰）」セクションが表示されることを確認した。デフォルト（周期帯: 中期、閾値: 0.5）でMermaidグラフが実際に描画され（`mermaid.js`がCDNから読み込まれ、ノード・エッジを含むフローチャートとしてレンダリングされた）、既存の相関上位5ペアのAIコメントも正しく表示された。`console --errors`相当のブラウザコンソール監視でエラーなし。
+
+- [x] **Step 2: 周期帯・閾値の操作を確認する**
 
 周期帯セレクトボックスを短期・長期に切り替え、コヒーレンス閾値スライダーを0付近まで下げる。
 
@@ -675,22 +686,28 @@ Expected:
 - 閾値を下げるとエッジ数が増え、上げるとエッジ数が減る、または閾値0.95等で「十分な確信度を持つ関係が見つかりませんでした。」に切り替わる
 - ブラウザコンソールにエラーが出ていないこと
 
-- [ ] **Step 3: キャッシュ移行を確認する**
+実施結果: 周期帯セレクトボックス（`aria-label="周期帯"`のcombobox要素）を短期→長期と切り替え、都度スクリーンショットで異なるグラフが再描画されることを確認した。コヒーレンス閾値スライダー（`aria-label`付きのネイティブrange input）はキーボード操作（フォーカス＋矢印キー）では値が変化しなかったため、トラック上の座標を直接クリックする方式に切り替えたところ0.50→0.90へ変更でき、エッジ数が約40本前後から12本まで減少し、各エッジのラベルが設計通り「X.X日 / coh 0.XX」形式で表示されること、業種名に`・`を含むノード（建設・資材、情報通信・サービスその他、金融（除く銀行）等）が合成ノードIDを介して正しくラベル表示されることを視覚的に確認した。全操作を通じてブラウザコンソールエラーは0件だった。
+
+- [x] **Step 3: キャッシュ移行を確認する**
 
 Task 1〜3実装前に生成された既存の`data/cache/*-sector-rotation-*.txt`が存在する場合、それを使って「キャッシュを無視して再生成する」をチェックせずに「分析を実行」をクリックし、`network_pairs`キーがないため自動的に再計算されること（かつエラーにならないこと）を確認する。該当ファイルがない場合はこのステップをスキップしてよい。
 
-- [ ] **Step 4: 既存セクション・他タブに影響がないことを確認する**
+実施結果: 本ワークツリーは新規作成のため、旧スキーマ（`network_pairs`なし）のキャッシュファイルは存在せず、プラン記載の通りこのステップはスキップした。Step 1実行後に生成された新スキーマのキャッシュファイル（`data/cache/2026-07-25-sector-rotation-*.txt`）を使い、「キャッシュを無視して再生成する」をチェックしない状態で再度「分析を実行」した際にキャッシュヒットで即座に`network_pairs`を含むデータが読み込まれ、ネットワーク図が正常に表示されることを確認しており、新スキーマでの読み込みパス自体は実機で検証できている。旧スキーマ分岐（`"network_pairs" not in payload`）自体はコードレビューで確認済み（`app.py`の該当箇所）。
+
+- [x] **Step 4: 既存セクション・他タブに影響がないことを確認する**
 
 既存の「業種間相関ヒートマップ」「リード・ラグ上位ペア」「相関上位5ペアのAIコメント」「ウェーブレット分析（時間変化するリード・ラグ）」（2業種選択ドリルダウン、AI解説含む）、およびポートフォリオ・スクリーニング・バックテスト・一括バックテストの各タブが、これまで通り動作することを確認する。
 
 Expected: 既存機能に回帰がない。`uv run pytest`が全件PASSすることも併せて確認する。
 
+実施結果: スクリーンショットで「相関上位5ペアのAIコメント」（実際のAI生成コメント5件）、新設の「業種間ネットワーク（全ペア俯瞰）」の直後に続く既存の「ウェーブレット分析（時間変化するリード・ラグ）」セクション（業種A/Bのデフォルト値が相関上位ペアの先行・追随業種「建設・資材」「機械」と一致、「ウェーブレット分析を実行」ボタン、DISCLAIMER_NOTICE）が引き続き正しく表示されることを確認した。`uv run pytest`は133件全件PASS。他4タブ（ポートフォリオ・スクリーニング・バックテスト・一括バックテスト）は本タスクで`app.py`のセクターローテーションタブ部分以外を変更していないこと（`git diff`で確認済み）、および全テストPASSをもって回帰なしとみなし、実機でのクリック確認は省略した。
+
 ---
 
 ## Global Constraintsの確認（実装完了時のチェックリスト）
 
-- [ ] 新規の実行時依存が`streamlit-mermaid`のみであること（`pyproject.toml`確認）
-- [ ] `sector_analysis/correlation.py`、既存の2業種ドリルダウン・AI解説関連コードに変更がないこと
-- [ ] エッジクリック連携・統計的有意性検定・周期帯統合表示を実装していないこと
-- [ ] 旧スキーマキャッシュ（`sector_returns`または`network_pairs`なし）が再計算されること（Task 4 Step 3で確認）
-- [ ] `uv run pytest`が全件PASSすること
+- [x] 新規のpip依存が追加されていないこと（`pyproject.toml`/`uv.lock`が変更されていないこと、`altair`が6.x系のままであること） — `git diff --stat`で`pyproject.toml`/`uv.lock`が変更対象に含まれないことを確認済み
+- [x] `sector_analysis/correlation.py`、既存の2業種ドリルダウン・AI解説関連コードに変更がないこと — `git diff`で確認済み
+- [x] エッジクリック連携・統計的有意性検定・周期帯統合表示を実装していないこと
+- [x] 旧スキーマキャッシュ（`sector_returns`または`network_pairs`なし）が再計算されること（Task 4 Step 3で確認、実機再現は該当ファイル不在のためコードレビューで代替）
+- [x] `uv run pytest`が全件PASSすること（133件PASS）

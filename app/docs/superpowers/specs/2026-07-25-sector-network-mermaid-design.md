@@ -17,7 +17,7 @@
   - `sector_analysis/network.py`（新設）: 集約結果からMermaidの有向グラフ定義文字列を生成する`build_mermaid_lead_lag_graph`
   - `app.py`: セクターローテーションタブの「分析を実行」フローに全ペア一括計算を統合し、「業種間ネットワーク（全ペア俯瞰）」セクションを追加（周期帯選択・コヒーレンス閾値スライダー・Mermaidグラフ表示）
   - 既存の`sector-rotation-*`キャッシュpayloadに`network_pairs`を追加
-  - 新規依存: `streamlit-mermaid`をpyproject.tomlに追加
+  - 新規依存追加なし: Mermaidの描画は`st.components.v1.html`でmermaid.js（CDN読み込み）を埋め込む自前ヘルパー関数で行う（`streamlit-mermaid`パッケージは`altair<5`を要求し、既存の全Altairチャート機能に影響するため不採用。詳細は「UI設計」節を参照）
 - v1で実装しない（将来課題）:
   - Mermaidグラフのエッジクリックによる、既存2業種ドリルダウンへの選択自動反映
   - 個別ペアの統計的有意性検定（既存ウェーブレット機能の将来課題を踏襲）
@@ -79,10 +79,26 @@ def build_mermaid_lead_lag_graph(
 
 ## UI設計 — `app.py`
 
-### 依存追加
+### Mermaid描画方法
 
-- `pyproject.toml`の`dependencies`に`"streamlit-mermaid"`を追加する（`uv add streamlit-mermaid`）
-- `from streamlit_mermaid import st_mermaid`をインポートする
+StreamlitはMermaidをネイティブ描画できず、`streamlit-mermaid`パッケージは`altair<5`を要求するため（既存の全Altairチャート機能が`altair>=6`に依存しており、導入すると既存チャートに影響するリスクがあるため）採用しない。新規pip依存を追加せず、`st.components.v1.html`でmermaid.js（CDN読み込み）を埋め込む自前のヘルパー関数`_render_mermaid`を実装する:
+
+```python
+import streamlit.components.v1 as components
+
+
+def _render_mermaid(code: str, height: int = 400) -> None:
+    """Mermaidコード文字列を、CDN経由のmermaid.jsを使ってHTML埋め込みで描画する。"""
+    html = f"""
+    <div class="mermaid">{code}</div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({{ startOnLoad: true }});</script>
+    """
+    components.html(html, height=height, scrolling=True)
+```
+
+- 業種名（`network_df`由来）にHTML特殊文字（`<`, `>`, `&`）は含まれない前提とする（`SECTOR_MAP`は固定の17業種区分のみ）。ユーザー入力に由来する文字列ではないためエスケープ処理は行わない
+- mermaid.jsの読み込みにはインターネット接続が必要（既存の株価データ取得（yfinance）・LLM呼び出しですでにインターネット接続前提のため、新たな制約ではない）
 
 ### 「分析を実行」フローへの統合
 
@@ -127,7 +143,7 @@ mermaid_code = build_mermaid_lead_lag_graph(network_df, network_band, coherence_
 if mermaid_code is None:
     st.info("十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。")
 else:
-    st_mermaid(mermaid_code)
+    _render_mermaid(mermaid_code)
 ```
 
 - 周期帯・閾値のデフォルトは中期・0.5

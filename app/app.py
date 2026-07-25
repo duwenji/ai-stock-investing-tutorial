@@ -12,6 +12,7 @@ from pathlib import Path
 import altair as alt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from analysis_agents.fundamental_agent import analyze_fundamentals
 from analysis_agents.news_research_agent import research_news_batch
@@ -47,7 +48,9 @@ from prompt_patterns.wavelet_explanation import generate_wavelet_explanation
 from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
+from sector_analysis.network import build_mermaid_lead_lag_graph
 from sector_analysis.wavelet import (
+    compute_all_pairs_dominant_lag,
     compute_cross_wavelet_lead_lag,
     compute_dominant_lag_series,
     deserialize_sector_returns,
@@ -84,6 +87,16 @@ def _cached_analyze_fundamentals(ticker: str) -> dict:
 def _cached_fetch_news(ticker: str) -> list[dict]:
     """ニュース取得結果を30分キャッシュし、同一銘柄への重複リクエストを避ける。"""
     return fetch_news(ticker)
+
+
+def _render_mermaid(code: str, height: int = 400) -> None:
+    """Mermaidコード文字列を、CDN経由のmermaid.jsを使ってHTML埋め込みで描画する。"""
+    html = f"""
+    <div class="mermaid">{code}</div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({{ startOnLoad: true }});</script>
+    """
+    components.html(html, height=height, scrolling=True)
 
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
@@ -756,8 +769,10 @@ with tab_sector:
             None if sector_force_regenerate else read_cache(CACHE_DIR, cache_key)
         )
         payload = json.loads(cached_payload) if cached_payload is not None else None
-        if payload is not None and "sector_returns" not in payload:
-            # 旧スキーマのキャッシュ（sector_returns未保存）は再計算して移行する
+        if payload is not None and (
+            "sector_returns" not in payload or "network_pairs" not in payload
+        ):
+            # 旧スキーマのキャッシュ（sector_returns/network_pairs未保存）は再計算して移行する
             payload = None
 
         if payload is None:
@@ -787,6 +802,8 @@ with tab_sector:
                     set(SECTOR_MAP.values()) - set(sector_returns.keys())
                 )
                 pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
+                with st.spinner("ネットワーク図データを計算中（136ペア）..."):
+                    network_pairs_df = compute_all_pairs_dominant_lag(sector_returns)
                 comments = generate_sector_rotation_comments(pairs[:5], call_llm=call_llm)
                 payload = {
                     "pairs": pairs,
@@ -794,6 +811,7 @@ with tab_sector:
                     "excluded_sectors": excluded_sectors,
                     "comments": comments,
                     "sector_returns": serialize_sector_returns(sector_returns),
+                    "network_pairs": network_pairs_df.to_dict("records"),
                 }
                 write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
@@ -900,6 +918,44 @@ with tab_sector:
                 )
         else:
             st.info("有効な業種ペアがありませんでした。")
+
+        st.subheader(
+            "業種間ネットワーク（全ペア俯瞰）",
+            help=(
+                "全業種ペアについて、直近20営業日のウェーブレット分析結果を集約し、"
+                "周期の長さごとにどの業種が誰をリードしているかを俯瞰します。"
+            ),
+        )
+        st.caption(
+            "コヒーレンス（関係の確からしさ）が閾値以上のペアのみを矢印で表示します。"
+            "矢印の元が先行業種、矢印の先が追随業種です。"
+        )
+
+        network_df = pd.DataFrame(payload["network_pairs"])
+        col_band, col_threshold = st.columns(2)
+        with col_band:
+            network_band = st.selectbox(
+                "周期帯", ["短期", "中期", "長期"], index=1, key="network_band"
+            )
+        with col_threshold:
+            network_threshold = st.slider(
+                "コヒーレンス閾値（これ以上のペアのみ表示）",
+                0.0,
+                1.0,
+                0.5,
+                0.05,
+                key="network_threshold",
+            )
+
+        mermaid_code = build_mermaid_lead_lag_graph(
+            network_df, network_band, network_threshold
+        )
+        if mermaid_code is None:
+            st.info(
+                "十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。"
+            )
+        else:
+            _render_mermaid(mermaid_code)
 
         st.subheader(
             "ウェーブレット分析（時間変化するリード・ラグ）",
