@@ -282,6 +282,11 @@ with tab_portfolio:
     )
     display_df = display_df[["ticker", "銘柄名", "shares", "cost"]]
 
+    st.caption(
+        "銘柄を削除するには、行左端のチェックボックスで対象行を選択してから "
+        "キーボードの Delete キー（または行選択時に表示されるゴミ箱アイコン）を押してください。"
+        "削除後は「保有銘柄を保存」ボタンを押すと確定します。"
+    )
     edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
