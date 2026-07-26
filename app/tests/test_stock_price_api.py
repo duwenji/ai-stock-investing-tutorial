@@ -200,3 +200,59 @@ def test_fetch_universe_fundamentals_logs_duration(tmp_path, caplog):
     assert "ユニバースfundamentals一括取得" in caplog.text
     assert "を開始" in caplog.text
     assert "が完了しました" in caplog.text
+
+
+def test_fetch_price_history_logs_request_and_response(monkeypatch, caplog):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_price_history("7203.T", period="1mo")
+
+    assert "株価履歴リクエスト: ticker=7203.T period=1mo" in caplog.text
+    assert "株価履歴レスポンス: ticker=7203.T" in caplog.text
+    assert "101" in caplog.text
+
+
+def test_fetch_fundamentals_logs_request_and_response(monkeypatch, caplog):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_fundamentals("7203.T")
+
+    assert "fundamentalsリクエスト: ticker=7203.T" in caplog.text
+    assert "fundamentalsレスポンス: ticker=7203.T" in caplog.text
+    assert "Fake Corp" in caplog.text
+
+
+def test_fetch_news_logs_request_and_response(monkeypatch, caplog):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_news("7203.T", limit=1)
+
+    assert "newsリクエスト: ticker=7203.T limit=1" in caplog.text
+    assert "newsレスポンス: ticker=7203.T" in caplog.text
+    assert "Headline 1" in caplog.text
+
+
+def test_fetch_japanese_name_logs_request_and_response(monkeypatch, caplog):
+    def fake_get(url, headers=None, timeout=None):
+        return FakeResponse(
+            "<title>シャープ(株)【6753】：株価・株式情報（夜間PTS含む） - Yahoo!ファイナンス</title>"
+        )
+
+    monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_japanese_name("6753.T")
+
+    assert "日本語銘柄名リクエスト: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
+    assert "日本語銘柄名レスポンス: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
+    assert "シャープ" in caplog.text
+
+
+def test_fetch_japanese_name_logs_warning_on_request_failure(monkeypatch, caplog):
+    def raise_error(url, headers=None, timeout=None):
+        raise stock_price_api.requests.RequestException("network error")
+
+    monkeypatch.setattr(stock_price_api.requests, "get", raise_error)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_japanese_name("6753.T")
+
+    assert "日本語銘柄名取得失敗: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text

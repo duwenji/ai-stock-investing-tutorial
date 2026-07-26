@@ -25,15 +25,23 @@ _YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
 
 def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
     """指定銘柄の株価時系列（OHLCV）をyfinance経由で取得する。"""
+    logger.info("株価履歴リクエスト: ticker=%s period=%s", ticker_symbol, period)
     ticker = yf.Ticker(ticker_symbol)
-    return ticker.history(period=period)
+    history = ticker.history(period=period)
+    logger.info(
+        "株価履歴レスポンス: ticker=%s data=%s",
+        ticker_symbol,
+        history.to_json(orient="records", date_format="iso"),
+    )
+    return history
 
 
 def fetch_fundamentals(ticker_symbol: str) -> dict:
     """指定銘柄のファンダメンタルズ指標（PER・PBR・配当利回り等）を取得する。"""
+    logger.info("fundamentalsリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
-    return {
+    result = {
         "ticker": ticker_symbol,
         "name": info.get("longName"),
         "trailing_pe": info.get("trailingPE"),
@@ -41,10 +49,13 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
         "dividend_yield": info.get("dividendYield"),
         "market_cap": info.get("marketCap"),
     }
+    logger.info("fundamentalsレスポンス: ticker=%s data=%s", ticker_symbol, result)
+    return result
 
 
 def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
     """指定銘柄に関連する最新ニュースを取得し、表示に必要な項目だけに整形する。"""
+    logger.info("newsリクエスト: ticker=%s limit=%s", ticker_symbol, limit)
     ticker = yf.Ticker(ticker_symbol)
     news_items = ticker.news or []
     result = []
@@ -61,6 +72,7 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
                 "link": link_info.get("url"),
             }
         )
+    logger.info("newsレスポンス: ticker=%s data=%s", ticker_symbol, result)
     return result
 
 
@@ -71,11 +83,14 @@ def fetch_japanese_name(ticker_symbol: str) -> str | None:
     返さないため、日本語名専用にこの関数を使う。
     """
     url = f"https://finance.yahoo.co.jp/quote/{ticker_symbol}"
+    logger.info("日本語銘柄名リクエスト: url=%s", url)
     try:
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
     except requests.RequestException:
+        logger.warning("日本語銘柄名取得失敗: url=%s", url)
         return None
+    logger.info("日本語銘柄名レスポンス: url=%s body=%s", url, response.text)
 
     match = _YAHOO_JP_TITLE_RE.search(response.text)
     if not match:
