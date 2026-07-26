@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -234,3 +236,18 @@ def test_compute_all_pairs_dominant_lag_returns_empty_for_single_sector():
         "lag_days_abs",
     ]
     assert result.empty
+
+
+def test_compute_all_pairs_dominant_lag_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=250, freq="D")
+    sector_returns = {
+        "業種X": pd.Series(range(250), index=dates, dtype=float) * 0.001,
+        "業種Y": pd.Series(range(250), index=dates, dtype=float) * 0.001,
+    }
+
+    with caplog.at_level(logging.INFO, logger="sector_analysis.wavelet"):
+        compute_all_pairs_dominant_lag(sector_returns)
+
+    assert "ウェーブレット全ペア計算" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text

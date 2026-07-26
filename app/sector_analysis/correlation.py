@@ -5,7 +5,13 @@
 時差相関によって推定する。
 """
 
+import logging
+
 import pandas as pd
+
+from common.logging_config import log_duration
+
+logger = logging.getLogger(__name__)
 
 
 def compute_sector_returns(
@@ -17,20 +23,21 @@ def compute_sector_returns(
     prices_by_tickerに存在しない銘柄はスキップする。構成銘柄が0件になった
     業種はキーごと結果から除外する。
     """
-    # 業種ごとに構成銘柄のリターン系列をまとめる
-    returns_by_sector: dict[str, list[pd.Series]] = {}
-    for ticker, sector in sector_map.items():
-        prices = prices_by_ticker.get(ticker)
-        if prices is None or prices.empty:
-            continue
-        returns_by_sector.setdefault(sector, []).append(prices.pct_change())
+    with log_duration(logger, "業種別リターン集計"):
+        # 業種ごとに構成銘柄のリターン系列をまとめる
+        returns_by_sector: dict[str, list[pd.Series]] = {}
+        for ticker, sector in sector_map.items():
+            prices = prices_by_ticker.get(ticker)
+            if prices is None or prices.empty:
+                continue
+            returns_by_sector.setdefault(sector, []).append(prices.pct_change())
 
-    # 業種内の各銘柄リターンを日次で等ウエイト平均し、業種代表リターンを算出
-    sector_returns: dict[str, pd.Series] = {}
-    for sector, series_list in returns_by_sector.items():
-        combined = pd.concat(series_list, axis=1)
-        sector_returns[sector] = combined.mean(axis=1, skipna=True)
-    return sector_returns
+        # 業種内の各銘柄リターンを日次で等ウエイト平均し、業種代表リターンを算出
+        sector_returns: dict[str, pd.Series] = {}
+        for sector, series_list in returns_by_sector.items():
+            combined = pd.concat(series_list, axis=1)
+            sector_returns[sector] = combined.mean(axis=1, skipna=True)
+        return sector_returns
 
 
 def compute_lead_lag_pairs(
@@ -44,49 +51,54 @@ def compute_lead_lag_pairs(
     ことになるため、sector_yが先行しsector_xが追随すると解釈する。
     共通の非欠損日数がmax_lag_days未満のペアは結果から除外する。
     """
-    sectors = sorted(sector_returns.keys())
-    pairs: list[dict] = []
+    with log_duration(logger, f"リード・ラグ相関計算（{len(sector_returns)}業種）"):
+        sectors = sorted(sector_returns.keys())
+        pairs: list[dict] = []
 
-    for i in range(len(sectors)):
-        for j in range(i + 1, len(sectors)):
-            sector_x, sector_y = sectors[i], sectors[j]
-            x, y = sector_returns[sector_x], sector_returns[sector_y]
+        for i in range(len(sectors)):
+            for j in range(i + 1, len(sectors)):
+                sector_x, sector_y = sectors[i], sectors[j]
+                x, y = sector_returns[sector_x], sector_returns[sector_y]
 
-            # -max_lag_days〜+max_lag_daysの範囲でラグをずらしながら相関係数を
-            # 総当たりで計算し、絶対値が最大となるラグ・相関を採用する
-            best_lag = None
-            best_corr = None
-            for lag in range(-max_lag_days, max_lag_days + 1):
-                aligned = pd.concat([x, y.shift(lag)], axis=1).dropna()
-                if len(aligned) < max_lag_days:
+                # -max_lag_days〜+max_lag_daysの範囲でラグをずらしながら相関係数を
+                # 総当たりで計算し、絶対値が最大となるラグ・相関を採用する
+                best_lag = None
+                best_corr = None
+                for lag in range(-max_lag_days, max_lag_days + 1):
+                    aligned = pd.concat([x, y.shift(lag)], axis=1).dropna()
+                    if len(aligned) < max_lag_days:
+                        continue
+                    corr = aligned.iloc[:, 0].corr(aligned.iloc[:, 1])
+                    if corr is None or pd.isna(corr):
+                        continue
+                    if best_corr is None or abs(corr) > abs(best_corr):
+                        best_corr = corr
+                        best_lag = lag
+
+                if best_lag is None:
                     continue
-                corr = aligned.iloc[:, 0].corr(aligned.iloc[:, 1])
-                if corr is None or pd.isna(corr):
-                    continue
-                if best_corr is None or abs(corr) > abs(best_corr):
-                    best_corr = corr
-                    best_lag = lag
 
-            if best_lag is None:
-                continue
+                # ラグの符号から先行・遅行のどちらの業種かを判定する
+                # （lag=0の場合は先行関係なしとみなし、名前順で決定的に並べる）
+                if best_lag > 0:
+                    leading, lagging, lag_days = sector_y, sector_x, best_lag
+                elif best_lag < 0:
+                    leading, lagging, lag_days = sector_x, sector_y, -best_lag
+                else:
+                    leading, lagging, lag_days = (
+                        min(sector_x, sector_y),
+                        max(sector_x, sector_y),
+                        0,
+                    )
 
-            # ラグの符号から先行・遅行のどちらの業種かを判定する
-            # （lag=0の場合は先行関係なしとみなし、名前順で決定的に並べる）
-            if best_lag > 0:
-                leading, lagging, lag_days = sector_y, sector_x, best_lag
-            elif best_lag < 0:
-                leading, lagging, lag_days = sector_x, sector_y, -best_lag
-            else:
-                leading, lagging, lag_days = min(sector_x, sector_y), max(sector_x, sector_y), 0
+                pairs.append(
+                    {
+                        "leading_sector": leading,
+                        "lagging_sector": lagging,
+                        "lag_days": lag_days,
+                        "correlation": float(best_corr),
+                    }
+                )
 
-            pairs.append(
-                {
-                    "leading_sector": leading,
-                    "lagging_sector": lagging,
-                    "lag_days": lag_days,
-                    "correlation": float(best_corr),
-                }
-            )
-
-    pairs.sort(key=lambda pair: abs(pair["correlation"]), reverse=True)
-    return pairs
+        pairs.sort(key=lambda pair: abs(pair["correlation"]), reverse=True)
+        return pairs

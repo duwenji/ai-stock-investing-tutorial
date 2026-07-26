@@ -1,8 +1,13 @@
 import itertools
+import logging
 
 import numpy as np
 import pandas as pd
 import pywt
+
+from common.logging_config import log_duration
+
+logger = logging.getLogger(__name__)
 
 WAVELET = "cmor1.5-1.0"
 
@@ -175,59 +180,60 @@ def compute_all_pairs_dominant_lag(
     compute_cross_wavelet_lead_lagが空のDataFrameを返した場合は、
     そのペアを結果から除外し処理を継続する。
     """
-    columns = [
-        "sector_x",
-        "sector_y",
-        "band",
-        "dominant_lag_days",
-        "mean_coherence",
-        "leading_sector",
-        "lagging_sector",
-        "lag_days_abs",
-    ]
-    rows = []
-    sectors = sorted(sector_returns.keys())
-    for sector_x, sector_y in itertools.combinations(sectors, 2):
-        try:
-            pair_df = compute_cross_wavelet_lead_lag(
-                sector_returns[sector_x], sector_returns[sector_y], sector_x, sector_y
-            )
-        except Exception:
-            continue
-        if pair_df.empty:
-            continue
-
-        for band in PERIOD_BANDS:
-            band_df = pair_df[pair_df["band"] == band]
-            if band_df.empty:
+    with log_duration(logger, f"ウェーブレット全ペア計算（{len(sector_returns)}業種）"):
+        columns = [
+            "sector_x",
+            "sector_y",
+            "band",
+            "dominant_lag_days",
+            "mean_coherence",
+            "leading_sector",
+            "lagging_sector",
+            "lag_days_abs",
+        ]
+        rows = []
+        sectors = sorted(sector_returns.keys())
+        for sector_x, sector_y in itertools.combinations(sectors, 2):
+            try:
+                pair_df = compute_cross_wavelet_lead_lag(
+                    sector_returns[sector_x], sector_returns[sector_y], sector_x, sector_y
+                )
+            except Exception:
                 continue
-            per_date = compute_dominant_lag_series(band_df)
-            if per_date.empty:
+            if pair_df.empty:
                 continue
 
-            windowed = per_date.tail(window_days)
-            weight_total = windowed["avg_coherence"].sum()
-            if weight_total <= 0:
-                continue
+            for band in PERIOD_BANDS:
+                band_df = pair_df[pair_df["band"] == band]
+                if band_df.empty:
+                    continue
+                per_date = compute_dominant_lag_series(band_df)
+                if per_date.empty:
+                    continue
 
-            dominant_lag_days = (
-                windowed["dominant_lag_days"] * windowed["avg_coherence"]
-            ).sum() / weight_total
-            mean_coherence = windowed["avg_coherence"].mean()
-            leading_sector = sector_x if dominant_lag_days >= 0 else sector_y
-            lagging_sector = sector_y if dominant_lag_days >= 0 else sector_x
+                windowed = per_date.tail(window_days)
+                weight_total = windowed["avg_coherence"].sum()
+                if weight_total <= 0:
+                    continue
 
-            rows.append(
-                {
-                    "sector_x": sector_x,
-                    "sector_y": sector_y,
-                    "band": band,
-                    "dominant_lag_days": dominant_lag_days,
-                    "mean_coherence": mean_coherence,
-                    "leading_sector": leading_sector,
-                    "lagging_sector": lagging_sector,
-                    "lag_days_abs": abs(dominant_lag_days),
-                }
-            )
+                dominant_lag_days = (
+                    windowed["dominant_lag_days"] * windowed["avg_coherence"]
+                ).sum() / weight_total
+                mean_coherence = windowed["avg_coherence"].mean()
+                leading_sector = sector_x if dominant_lag_days >= 0 else sector_y
+                lagging_sector = sector_y if dominant_lag_days >= 0 else sector_x
 
-    return pd.DataFrame(rows, columns=columns)
+                rows.append(
+                    {
+                        "sector_x": sector_x,
+                        "sector_y": sector_y,
+                        "band": band,
+                        "dominant_lag_days": dominant_lag_days,
+                        "mean_coherence": mean_coherence,
+                        "leading_sector": leading_sector,
+                        "lagging_sector": lagging_sector,
+                        "lag_days_abs": abs(dominant_lag_days),
+                    }
+                )
+
+        return pd.DataFrame(rows, columns=columns)

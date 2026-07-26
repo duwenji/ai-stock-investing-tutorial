@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -87,3 +89,31 @@ def test_compute_lead_lag_pairs_sorts_by_absolute_correlation_descending():
     assert {strongest["leading_sector"], strongest["lagging_sector"]} == {"A業種", "B業種"}
     for earlier, later in zip(pairs, pairs[1:]):
         assert abs(earlier["correlation"]) >= abs(later["correlation"])
+
+
+def test_compute_sector_returns_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+    prices_by_ticker = {"A.T": pd.Series([100.0, 101.0, 102.0, 101.5, 103.0], index=dates)}
+    sector_map = {"A.T": "業種X"}
+
+    with caplog.at_level(logging.INFO, logger="sector_analysis.correlation"):
+        compute_sector_returns(prices_by_ticker, sector_map)
+
+    assert "業種別リターン集計" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text
+
+
+def test_compute_lead_lag_pairs_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=30, freq="D")
+    sector_returns = {
+        "業種X": pd.Series(range(30), index=dates, dtype=float),
+        "業種Y": pd.Series(range(30, 60), index=dates, dtype=float),
+    }
+
+    with caplog.at_level(logging.INFO, logger="sector_analysis.correlation"):
+        compute_lead_lag_pairs(sector_returns, max_lag_days=5)
+
+    assert "リード・ラグ相関計算" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text
