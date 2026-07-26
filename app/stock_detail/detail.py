@@ -2,6 +2,7 @@
 ニュース・LLMによる講評コメントを1つにまとめて生成するモジュール。"""
 
 import json
+import logging
 from pathlib import Path
 
 from analysis_agents.fundamental_agent import (
@@ -9,10 +10,13 @@ from analysis_agents.fundamental_agent import (
 )
 from analysis_agents.technical_agent import analyze_technical as default_analyze_technical
 from common.cache import read_cache, write_cache
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm as default_call_llm
 from data_api.stock_price_api import fetch_news as default_fetch_news
 from data_api.stock_price_api import fetch_price_history as default_fetch_price_history
 from prompt_patterns.stock_detail import build_stock_detail_prompt
+
+logger = logging.getLogger(__name__)
 
 
 def generate_stock_detail(
@@ -39,40 +43,43 @@ def generate_stock_detail(
         if "open" in payload["price_history"]:
             return payload
 
-    # 移動平均線（特に75日線）の計算バッファとして、表示に必要な6ヶ月分より
-    # 長めの2年分を取得する。
-    history = fetch_price_history(ticker, period="2y")
-    fundamentals = analyze_fundamentals(ticker)
-    technical = analyze_technical(history)
-    news = fetch_news(ticker)
+    with log_duration(logger, f"銘柄詳細生成（{ticker}）"):
+        # 移動平均線（特に75日線）の計算バッファとして、表示に必要な6ヶ月分より
+        # 長めの2年分を取得する。
+        history = fetch_price_history(ticker, period="2y")
+        fundamentals = analyze_fundamentals(ticker)
+        technical = analyze_technical(history)
+        news = fetch_news(ticker)
 
-    # チャート描画用に、pandasのDataFrameをJSONシリアライズ可能な
-    # プレーンな辞書（日付文字列＋各系列のリスト）に変換する
-    if history.empty:
-        price_history = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
-    else:
-        price_history = {
-            "dates": [d.isoformat() for d in history.index],
-            "open": history["Open"].tolist(),
-            "high": history["High"].tolist(),
-            "low": history["Low"].tolist(),
-            "close": history["Close"].tolist(),
-            "volume": history["Volume"].tolist(),
+        # チャート描画用に、pandasのDataFrameをJSONシリアライズ可能な
+        # プレーンな辞書（日付文字列＋各系列のリスト）に変換する
+        if history.empty:
+            price_history = {
+                "dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []
+            }
+        else:
+            price_history = {
+                "dates": [d.isoformat() for d in history.index],
+                "open": history["Open"].tolist(),
+                "high": history["High"].tolist(),
+                "low": history["Low"].tolist(),
+                "close": history["Close"].tolist(),
+                "volume": history["Volume"].tolist(),
+            }
+
+        # ここまでに集めたファンダメンタルズ・テクニカル・ニュースをプロンプトに
+        # まとめ、LLMに銘柄の講評コメントを生成させる
+        prompt = build_stock_detail_prompt(ticker, name, fundamentals, technical, news)
+        comment = call_llm(prompt)
+
+        payload = {
+            "ticker": ticker,
+            "name": name,
+            "price_history": price_history,
+            "fundamentals": fundamentals,
+            "technical": technical,
+            "news": news,
+            "comment": comment,
         }
-
-    # ここまでに集めたファンダメンタルズ・テクニカル・ニュースをプロンプトに
-    # まとめ、LLMに銘柄の講評コメントを生成させる
-    prompt = build_stock_detail_prompt(ticker, name, fundamentals, technical, news)
-    comment = call_llm(prompt)
-
-    payload = {
-        "ticker": ticker,
-        "name": name,
-        "price_history": price_history,
-        "fundamentals": fundamentals,
-        "technical": technical,
-        "news": news,
-        "comment": comment,
-    }
-    write_cache(cache_dir, cache_key, json.dumps(payload, ensure_ascii=False))
-    return payload
+        write_cache(cache_dir, cache_key, json.dumps(payload, ensure_ascii=False))
+        return payload

@@ -1,4 +1,5 @@
 import json
+import logging
 
 import pandas as pd
 
@@ -141,3 +142,21 @@ def test_generate_stock_detail_ignores_stale_cache_missing_ohlcv(tmp_path):
 
     assert result["comment"] == "再生成後のコメント"
     assert result["price_history"]["open"] == [99.0, 100.5, 101.5]
+
+
+def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog):
+    with caplog.at_level(logging.INFO, logger="stock_detail.detail"):
+        generate_stock_detail(
+            "AAA.T",
+            "エーエー株式会社",
+            tmp_path,
+            call_llm=lambda prompt: "コメント",
+            fetch_price_history=lambda ticker, period: _fake_history(),
+            fetch_news=lambda ticker: [],
+            analyze_fundamentals=lambda ticker: {},
+            analyze_technical=lambda history: {},
+        )
+
+    assert "銘柄詳細生成（AAA.T）" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text
