@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 
 from common.disclaimer import DISCLAIMER_NOTICE
@@ -288,3 +290,31 @@ def test_run_universe_backtest_ranking_falls_back_to_total_return_when_drawdown_
     )
 
     assert result[0]["risk_adjusted_return"] == 15.0
+
+
+def test_run_backtest_comparison_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=80, freq="D")
+    prices = pd.Series(range(100, 180), index=dates, dtype=float)
+
+    with caplog.at_level(logging.INFO, logger="portfolio_management.backtest"):
+        run_backtest_comparison(
+            prices, run_ma_crossover_backtest, STRATEGIES["移動平均クロスオーバー"]["presets"]
+        )
+
+    assert "バックテスト比較計算" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text
+
+
+def test_run_universe_backtest_ranking_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=80, freq="D")
+    prices_by_ticker = {"AAA.T": pd.Series(range(100, 180), index=dates, dtype=float)}
+
+    with caplog.at_level(logging.INFO, logger="portfolio_management.backtest"):
+        run_universe_backtest_ranking(
+            prices_by_ticker, run_ma_crossover_backtest, {"short_window": 5, "long_window": 25}
+        )
+
+    assert "ユニバース一括バックテスト" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text

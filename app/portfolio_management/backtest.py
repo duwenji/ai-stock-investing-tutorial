@@ -2,11 +2,16 @@
 過去の株価系列でベクトル化バックテストを実行し、成績指標やLLMによる
 解説文を生成するモジュール。"""
 
+import logging
+
 import pandas as pd
 
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm as default_call_llm
 from prompt_patterns.backtest_explanation import build_backtest_prompt
+
+logger = logging.getLogger(__name__)
 
 
 def _finalize_backtest(prices: pd.Series, position: pd.Series, transaction_cost_pct: float) -> dict:
@@ -196,10 +201,11 @@ def run_backtest_comparison(
 ) -> dict[str, dict]:
     """同一戦略の複数プリセット（パラメータ設定）でバックテストを実行し、
     プリセット名ごとの成績を比較できる形でまとめる。"""
-    return {
-        label: backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **params)
-        for label, params in presets
-    }
+    with log_duration(logger, f"バックテスト比較計算（プリセット{len(presets)}件）"):
+        return {
+            label: backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **params)
+            for label, params in presets
+        }
 
 
 def generate_backtest_explanation(
@@ -243,18 +249,25 @@ def run_universe_backtest_ranking(
 ) -> list[dict]:
     """銘柄ユニバース全体に同一戦略・同一パラメータでバックテストを行い、
     リスク調整後リターン（収益率÷最大ドローダウン）でランキングする。"""
-    rows = []
-    for ticker, prices in prices_by_ticker.items():
-        # データ期間が短すぎる銘柄は戦略が機能しないため除外する。
-        if len(prices) < min_days:
-            continue
-        result = backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **preset_params)
-        drawdown = abs(result["max_drawdown_pct"])
-        # ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま指標とする。
-        risk_adjusted_return = (
-            result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
-        )
-        rows.append(
-            {"ticker": ticker, **result, "risk_adjusted_return": round(risk_adjusted_return, 2)}
-        )
-    return sorted(rows, key=lambda row: row["risk_adjusted_return"], reverse=True)
+    with log_duration(logger, f"ユニバース一括バックテスト（{len(prices_by_ticker)}銘柄）"):
+        rows = []
+        for ticker, prices in prices_by_ticker.items():
+            # データ期間が短すぎる銘柄は戦略が機能しないため除外する。
+            if len(prices) < min_days:
+                continue
+            result = backtest_func(
+                prices, transaction_cost_pct=transaction_cost_pct, **preset_params
+            )
+            drawdown = abs(result["max_drawdown_pct"])
+            # ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま指標とする。
+            risk_adjusted_return = (
+                result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
+            )
+            rows.append(
+                {
+                    "ticker": ticker,
+                    **result,
+                    "risk_adjusted_return": round(risk_adjusted_return, 2),
+                }
+            )
+        return sorted(rows, key=lambda row: row["risk_adjusted_return"], reverse=True)
