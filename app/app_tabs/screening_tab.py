@@ -1,0 +1,101 @@
+"""スクリーニングタブ: 自然言語条件によるユニバース銘柄の絞り込み。"""
+
+import json
+
+import streamlit as st
+
+from common.json_parsing import strip_code_fence
+from data_api.llm_client import call_llm
+from data_api.stock_price_api import fetch_universe_fundamentals
+from prompt_patterns.screening import (
+    apply_filters,
+    build_screening_prompt,
+    generate_screening_comments,
+)
+from screening.sectors import SECTOR_MAP
+from screening.universe import UNIVERSE, UNIVERSE_NAMES
+
+from app_tabs.shared import CACHE_DIR, handle_table_selection
+
+
+def render_screening_tab() -> None:
+    st.header("銘柄スクリーニング")
+
+    condition_text = st.text_input(
+        "スクリーニング条件を自然言語で入力してください",
+        placeholder="PERが15倍以下で配当利回りが3%以上",
+    )
+
+    if condition_text:
+        # 入力条件が前回から変わった場合のみLLMを呼び出し、自然言語条件を
+        # 構造化フィルタ（JSON）に変換する。変わっていなければ結果をセッションから再利用する
+        if st.session_state.get("screening_condition_text") != condition_text:
+            prompt = build_screening_prompt(
+                condition_text, sectors=sorted(set(SECTOR_MAP.values()))
+            )
+            raw_filters = call_llm(prompt)
+            st.session_state["screening_condition_text"] = condition_text
+            try:
+                st.session_state["screening_filters"] = json.loads(strip_code_fence(raw_filters))
+                st.session_state["screening_filters_error"] = False
+            except json.JSONDecodeError:
+                # LLMの出力が不正なJSONだった場合はエラーとして扱い、フィルタなしにする
+                st.session_state["screening_filters"] = None
+                st.session_state["screening_filters_error"] = True
+
+        filters = st.session_state.get("screening_filters")
+        if st.session_state.get("screening_filters_error"):
+            st.error("条件の解釈に失敗しました。条件を言い換えて再度お試しください。")
+
+        if filters is not None:
+            # 実際に適用する前にAIが解釈した条件をユーザーに確認させる
+            st.subheader("AIが解釈した条件（適用前に確認してください）")
+            st.json(filters)
+
+            # ユニバース銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
+            if st.button("この条件で絞り込む"):
+                universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+                universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+                    universe_df["name"]
+                )
+                universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
+                result_df = apply_filters(universe_df, filters)
+                comments = generate_screening_comments(result_df, call_llm=call_llm)
+
+                st.session_state["screening_result_df"] = result_df
+                st.session_state["screening_comments"] = comments
+                st.session_state["screening_selected_row"] = None
+                st.session_state["screening_result_table"] = {
+                    "selection": {"rows": [], "columns": []}
+                }
+
+    # 絞り込み結果があれば、選択可能な一覧表と銘柄ごとのAIコメントを表示する
+    if st.session_state.get("screening_result_df") is not None:
+        result_df = st.session_state["screening_result_df"]
+        comments = st.session_state["screening_comments"]
+
+        st.subheader(f"絞り込み結果（{len(result_df)}件）")
+        st.caption("行をクリックすると銘柄詳細を表示します。")
+        event = st.dataframe(
+            result_df,
+            column_config={
+                "ticker": st.column_config.TextColumn("銘柄コード"),
+                "name": st.column_config.TextColumn("銘柄名"),
+                "sector": st.column_config.TextColumn("業種"),
+                "per": st.column_config.NumberColumn("PER"),
+                "pbr": st.column_config.NumberColumn("PBR"),
+                "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
+                "market_cap": st.column_config.NumberColumn("時価総額"),
+            },
+            on_select="rerun",
+            selection_mode="single-row",
+            key="screening_result_table",
+        )
+        handle_table_selection("screening_selected_row", event, result_df)
+
+        st.subheader("銘柄ごとのAIコメント")
+        for row in result_df.itertuples():
+            st.write(
+                f"**{row.ticker} {row.name}**: "
+                f"{comments.get(row.ticker, 'コメント生成失敗')}"
+            )
