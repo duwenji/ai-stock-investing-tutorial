@@ -104,17 +104,25 @@ def render_portfolio_tab() -> None:
         st.success("保存しました。")
         holdings = new_holdings
 
-    # 保有銘柄ごとに詳細ダイアログを開くためのボタン一覧
+    # 保有銘柄から選んで詳細ダイアログを開く
     if holdings:
         st.subheader("銘柄詳細を見る")
-        for i, holding in enumerate(holdings):
-            ticker = holding["ticker"]
-            name = candidate_names.get(ticker, "")
-            col_ticker, col_name, col_button = st.columns([2, 4, 2])
-            col_ticker.write(ticker)
-            col_name.write(name)
-            if col_button.button("詳細", key=f"portfolio_detail_{i}_{ticker}"):
-                show_stock_detail_dialog(ticker, name)
+        detail_options = [
+            f"{holding['ticker']} {candidate_names.get(holding['ticker'], '')}"
+            for holding in holdings
+        ]
+        detail_col, button_col = st.columns([4, 1])
+        with detail_col:
+            picked_detail = st.selectbox(
+                "詳細を見る銘柄を選択",
+                detail_options,
+                key="portfolio_detail_select",
+                label_visibility="collapsed",
+            )
+        with button_col:
+            if st.button("詳細", key="portfolio_detail_button") and picked_detail:
+                detail_ticker = picked_detail.split(" ", 1)[0]
+                show_stock_detail_dialog(detail_ticker, candidate_names.get(detail_ticker, ""))
 
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
 
