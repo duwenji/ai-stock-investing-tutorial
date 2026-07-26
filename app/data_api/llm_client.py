@@ -1,8 +1,13 @@
 """Claude Code CLI（`claude`コマンド）をサブプロセスとして呼び出し、
 LLMへのプロンプト送信・応答取得を行うための薄いラッパーモジュール。"""
 
+import logging
 import shutil
 import subprocess
+
+from common.logging_config import log_duration
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeCLINotFoundError(RuntimeError):
@@ -44,19 +49,21 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
     各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
     """
     executable = _resolve_claude_executable()
-    # Prompt is passed via stdin, not argv: on Windows, `claude` resolves to
-    # an npm .cmd shim, whose batch-argument relay corrupts arguments that
-    # contain embedded double quotes (our JSON-format prompts do).
-    result = subprocess.run(
-        [executable, "--system-prompt", _SYSTEM_PROMPT, "-p"],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=timeout,
-    )
-    if result.returncode != 0:
-        # 非ゼロ終了はCLI側のエラー（未ログイン、タイムアウト等）とみなし、
-        # 標準エラー出力を含めて呼び出し元に伝播する。
-        raise ClaudeCLIError(f"Claude Code CLIの実行に失敗しました: {result.stderr.strip()}")
+    # プロンプト本文は機密情報や長大なJSONを含みうるためログに出さず、長さのみ記録する。
+    with log_duration(logger, f"Claude CLI呼び出し（prompt長={len(prompt)}）"):
+        # Prompt is passed via stdin, not argv: on Windows, `claude` resolves to
+        # an npm .cmd shim, whose batch-argument relay corrupts arguments that
+        # contain embedded double quotes (our JSON-format prompts do).
+        result = subprocess.run(
+            [executable, "--system-prompt", _SYSTEM_PROMPT, "-p"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            # 非ゼロ終了はCLI側のエラー（未ログイン、タイムアウト等）とみなし、
+            # 標準エラー出力を含めて呼び出し元に伝播する。
+            raise ClaudeCLIError(f"Claude Code CLIの実行に失敗しました: {result.stderr.strip()}")
     return result.stdout.strip()
