@@ -49,8 +49,8 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
     各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
     """
     executable = _resolve_claude_executable()
-    # プロンプト本文は機密情報や長大なJSONを含みうるためログに出さず、長さのみ記録する。
     with log_duration(logger, f"Claude CLI呼び出し（prompt長={len(prompt)}）"):
+        logger.info("Claude CLIリクエスト: %s", prompt)
         # Prompt is passed via stdin, not argv: on Windows, `claude` resolves to
         # an npm .cmd shim, whose batch-argument relay corrupts arguments that
         # contain embedded double quotes (our JSON-format prompts do).
@@ -66,4 +66,5 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
             # 非ゼロ終了はCLI側のエラー（未ログイン、タイムアウト等）とみなし、
             # 標準エラー出力を含めて呼び出し元に伝播する。
             raise ClaudeCLIError(f"Claude Code CLIの実行に失敗しました: {result.stderr.strip()}")
+        logger.info("Claude CLIレスポンス: %s", result.stdout)
     return result.stdout.strip()

@@ -80,3 +80,34 @@ def test_call_llm_logs_failure_on_nonzero_exit(monkeypatch, caplog):
             call_llm("hello")
 
     assert "が失敗しました" in caplog.text
+
+
+def test_call_llm_logs_request_and_response_content(monkeypatch, caplog):
+    monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
+
+    def fake_run(args, input, capture_output, text, encoding, timeout):
+        return subprocess.CompletedProcess(args, 0, stdout="response text\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with caplog.at_level(logging.INFO, logger="data_api.llm_client"):
+        call_llm("this is the prompt content")
+
+    assert "Claude CLIリクエスト: this is the prompt content" in caplog.text
+    assert "Claude CLIレスポンス: response text" in caplog.text
+
+
+def test_call_llm_does_not_log_response_on_failure(monkeypatch, caplog):
+    monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
+
+    def fake_run(args, input, capture_output, text, encoding, timeout):
+        return subprocess.CompletedProcess(
+            args, 1, stdout="should not be logged", stderr="boom"
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with caplog.at_level(logging.INFO, logger="data_api.llm_client"):
+        with pytest.raises(ClaudeCLIError):
+            call_llm("prompt")
+
+    assert "Claude CLIリクエスト: prompt" in caplog.text
+    assert "Claude CLIレスポンス" not in caplog.text
