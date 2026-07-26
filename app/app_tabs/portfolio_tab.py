@@ -22,18 +22,16 @@ from app_tabs.shared import (
     cached_fetch_japanese_name,
     cached_fetch_news,
     cached_fetch_price_history,
-    show_stock_detail_dialog,
+    handle_table_selection,
 )
 
 
 def render_portfolio_tab() -> None:
     st.header("保有銘柄ポートフォリオ")
 
-    # 初回表示時は保存済みの保有銘柄をロードし、なければ空行を1つ用意して編集を開始できるようにする
+    # 初回表示時は保存済みの保有銘柄をロードする
     if "holdings_rows" not in st.session_state:
-        st.session_state["holdings_rows"] = load_holdings(HOLDINGS_PATH) or [
-            {"ticker": "", "shares": 0, "cost": 0.0}
-        ]
+        st.session_state["holdings_rows"] = load_holdings(HOLDINGS_PATH)
 
     candidate_names = build_candidate_names(
         st.session_state["holdings_rows"], resolve_name=cached_fetch_japanese_name
@@ -66,63 +64,66 @@ def render_portfolio_tab() -> None:
                 {"ticker": picked_ticker, "shares": 0, "cost": 0.0}
             )
 
-    # 表示用に銘柄名列を付加した編集可能テーブルを構築する
-    display_df = pd.DataFrame(st.session_state["holdings_rows"])
-    display_df["銘柄名"] = display_df["ticker"].map(
-        lambda ticker: candidate_names.get(ticker, "")
-    )
-    display_df = display_df[["ticker", "銘柄名", "shares", "cost"]]
+    holdings = st.session_state["holdings_rows"]
 
-    st.caption(
-        "銘柄を削除するには、行左端のチェックボックスで対象行を選択してから "
-        "キーボードの Delete キー（または行選択時に表示されるゴミ箱アイコン）を押してください。"
-        "削除後は「保有銘柄を保存」ボタンを押すと確定します。"
-    )
-    edited_df = st.data_editor(
-        display_df,
-        num_rows="dynamic",
-        key="holdings_editor",
-        column_config={
-            "ticker": st.column_config.TextColumn("銘柄コード"),
-            "銘柄名": st.column_config.TextColumn("銘柄名", disabled=True),
-            "shares": st.column_config.NumberColumn("保有株数"),
-            "cost": st.column_config.NumberColumn("取得単価"),
-        },
-    )
-
-    holdings = load_holdings(HOLDINGS_PATH)
-
-    # 編集内容をファイルに保存し、セッション状態と表示中の保有銘柄も最新化する
-    if st.button("保有銘柄を保存"):
-        new_holdings = [
-            {"ticker": row["ticker"], "shares": row["shares"], "cost": row["cost"]}
-            for row in edited_df.to_dict(orient="records")
-            if row.get("ticker")
-        ]
-        save_holdings(HOLDINGS_PATH, new_holdings)
-        st.session_state["holdings_rows"] = new_holdings
-        st.success("保存しました。")
-        holdings = new_holdings
-
-    # 保有銘柄から選んで詳細ダイアログを開く
+    # 表示用に銘柄名列を付加した一覧表を構築する（行をクリックすると詳細ダイアログを開く）
     if holdings:
-        st.subheader("銘柄詳細を見る")
-        detail_options = [
-            f"{holding['ticker']} {candidate_names.get(holding['ticker'], '')}"
-            for holding in holdings
-        ]
-        detail_col, button_col = st.columns([4, 1])
-        with detail_col:
-            picked_detail = st.selectbox(
-                "詳細を見る銘柄を選択",
-                detail_options,
-                key="portfolio_detail_select",
-                label_visibility="collapsed",
-            )
-        with button_col:
-            if st.button("詳細", key="portfolio_detail_button") and picked_detail:
-                detail_ticker = picked_detail.split(" ", 1)[0]
-                show_stock_detail_dialog(detail_ticker, candidate_names.get(detail_ticker, ""))
+        display_df = pd.DataFrame(holdings)
+        display_df["name"] = display_df["ticker"].map(
+            lambda ticker: candidate_names.get(ticker, "")
+        )
+        display_df = display_df[["ticker", "name", "shares", "cost"]]
+
+        st.caption("行をクリックすると銘柄詳細を表示します。")
+        event = st.dataframe(
+            display_df,
+            column_config={
+                "ticker": st.column_config.TextColumn("銘柄コード"),
+                "name": st.column_config.TextColumn("銘柄名"),
+                "shares": st.column_config.NumberColumn("保有株数"),
+                "cost": st.column_config.NumberColumn("取得単価"),
+            },
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="holdings_table",
+        )
+        handle_table_selection("portfolio_selected_row", event, display_df)
+
+        # 選択中の行があれば、保有株数・取得単価の更新／削除を行うフォームを表示する
+        selected_idx = st.session_state.get("portfolio_selected_row")
+        if selected_idx is not None and selected_idx < len(holdings):
+            selected = holdings[selected_idx]
+            st.caption(f"選択中: {selected['ticker']} {candidate_names.get(selected['ticker'], '')}")
+            shares_col, cost_col, update_col, delete_col = st.columns([2, 2, 1, 1])
+            with shares_col:
+                new_shares = st.number_input(
+                    "保有株数", value=float(selected["shares"]), key="edit_shares"
+                )
+            with cost_col:
+                new_cost = st.number_input(
+                    "取得単価", value=float(selected["cost"]), key="edit_cost"
+                )
+            with update_col:
+                st.write("")
+                if st.button("更新"):
+                    holdings[selected_idx] = {
+                        "ticker": selected["ticker"],
+                        "shares": new_shares,
+                        "cost": new_cost,
+                    }
+                    save_holdings(HOLDINGS_PATH, holdings)
+                    st.success("更新しました。")
+                    st.rerun()
+            with delete_col:
+                st.write("")
+                if st.button("削除"):
+                    del holdings[selected_idx]
+                    save_holdings(HOLDINGS_PATH, holdings)
+                    st.session_state["portfolio_selected_row"] = None
+                    st.rerun()
+    else:
+        st.caption("保有銘柄がありません。上の検索から銘柄を追加してください。")
 
     force_regenerate = st.checkbox("キャッシュを無視して再生成する")
 
