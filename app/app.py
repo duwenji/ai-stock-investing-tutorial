@@ -6,9 +6,12 @@
 各タブの描画処理は app_tabs 配下のモジュールに分割している。
 """
 
+import logging
+
 import streamlit as st
 
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.logging_config import setup_logging
 from data_api.llm_client import check_claude_cli_available
 
 from app_tabs.backtest_tab import render_backtest_tab
@@ -16,6 +19,12 @@ from app_tabs.portfolio_tab import render_portfolio_tab
 from app_tabs.ranking_tab import render_ranking_tab
 from app_tabs.screening_tab import render_screening_tab
 from app_tabs.sector import render_sector_tab
+
+setup_logging()
+logger = logging.getLogger(__name__)
+# StreamlitはユーザーがUI操作するたびにapp.pyを再実行するため、このログは
+# 起動時だけでなく再実行のたびに出る。以降のログとの時系列対応付けに使う。
+logger.info("app.pyを実行しました")
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
 
