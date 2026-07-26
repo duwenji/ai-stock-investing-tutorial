@@ -17,7 +17,7 @@
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | UI                 | Streamlit（`st.tabs` による5タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）。`app.py` は起動処理とタブ生成のみを担い、各タブの描画は `app_tabs/` 配下のモジュールに分割 |
 | データ処理         | pandas / numpy                                                                                             |
-| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`streamlit.components.v1.html`でパン・ズーム可能に埋め込み） |
+| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`st.iframe`でパン・ズーム可能に埋め込み） |
 | 株価・ニュース取得 | yfinance                                                                                                   |
 | 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                      |
 | LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）            |
@@ -624,7 +624,7 @@ sequenceDiagram
 #### ネットワーク図（`sector_analysis/network.py`, `build_mermaid_lead_lag_graph`）
 
 - キャッシュ済みの `network_pairs`（全136ペア×3周期帯のウェーブレット集約結果）から、ユーザーが選んだ**周期帯**（短期/中期/長期のセレクトボックス）と**コヒーレンス閾値**（0〜1のスライダー、デフォルト0.5）でフィルタし、Mermaidの `flowchart LR` 有向グラフ定義文字列を組み立てる。業種名はMermaidのノードID規則に使えない文字（「・」等）を含みうるため、`S0`, `S1`, ... の合成IDをノードIDとし、業種名はラベルとしてのみ使う。エッジには先行→追随の矢印とラグ日数・コヒーレンスを付与する。フィルタ後にエッジが0件になった場合は `None` を返し、UI側は「十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。」と案内する。
-- 生成したMermaidコードは `_render_mermaid`（`app_tabs/sector/network_diagram.py`）が、CDNから読み込んだ `mermaid.js` と `svg-pan-zoom.js` を使い `streamlit.components.v1.html` 経由でHTML埋め込みとして描画する。業種間ネットワークは横に広がりやすいため、単純な自動フィットではなく「縦方向優先で拡大しつつ、全体表示時倍率の2倍を上限とする」独自ロジックでズーム倍率を決めており、はみ出した部分はドラッグ・ホイールで閲覧する。
+- 生成したMermaidコードは `_render_mermaid`（`app_tabs/sector/network_diagram.py`）が、CDNから読み込んだ `mermaid.js` と `svg-pan-zoom.js` を使い `st.iframe` 経由でHTML埋め込みとして描画する。業種間ネットワークは横に広がりやすいため、単純な自動フィットではなく「縦方向優先で拡大しつつ、全体表示時倍率の2倍を上限とする」独自ロジックでズーム倍率を決めており、はみ出した部分はドラッグ・ホイールで閲覧する。
 
 #### ウェーブレット分析（`sector_analysis/wavelet.py`）
 

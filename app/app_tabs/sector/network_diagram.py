@@ -2,7 +2,6 @@
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from sector_analysis.network import build_mermaid_lead_lag_graph
 
@@ -51,7 +50,7 @@ def _render_mermaid(code: str, height: int = 400) -> None:
       }});
     </script>
     """
-    components.html(html, height=height, scrolling=True)
+    st.iframe(html, height=height)
 
 
 def render_network_diagram(network_pairs: list[dict], height: int) -> None:
