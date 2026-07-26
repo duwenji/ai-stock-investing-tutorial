@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 
 import pandas as pd
 import streamlit as st
@@ -9,6 +10,7 @@ import streamlit as st
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm
 from portfolio_management.backtest import STRATEGIES, run_universe_backtest_ranking
 from portfolio_management.storage import load_holdings
@@ -24,8 +26,11 @@ from app_tabs.shared import (
     handle_table_selection,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def render_ranking_tab() -> None:
+    logger.info("一括バックテストタブを表示")
     st.header("複数銘柄一括バックテスト・ランキング")
     st.caption(
         "主要銘柄（UNIVERSE）と保有銘柄を対象に、選択した戦略の標準プリセットで"
@@ -64,43 +69,47 @@ def render_ranking_tab() -> None:
         payload = json.loads(cached_payload) if cached_payload is not None else None
 
         if payload is None:
-            prices_by_ticker = {}
-            skipped_tickers = []
-            # 多数の銘柄の株価取得を並列化して待ち時間を短縮する
-            with st.spinner(f"株価データを取得中...（{len(target_tickers)}銘柄）"):
-                price_results = map_concurrently(
-                    target_tickers,
-                    lambda ticker: cached_fetch_price_history(ticker, ranking_period),
-                )
-            # データ取得に失敗・不足した銘柄はランキング対象から除外し、後で案内する
-            for ticker in target_tickers:
-                history = price_results[ticker]
-                if isinstance(history, Exception) or history is None or history.empty:
-                    skipped_tickers.append(ticker)
-                else:
-                    prices_by_ticker[ticker] = history["Close"]
+            with log_duration(
+                logger, f"一括バックテスト実行（{ranking_strategy}, {len(target_tickers)}銘柄）"
+            ):
+                prices_by_ticker = {}
+                skipped_tickers = []
+                # 多数の銘柄の株価取得を並列化して待ち時間を短縮する
+                with st.spinner(f"株価データを取得中...（{len(target_tickers)}銘柄）"):
+                    price_results = map_concurrently(
+                        target_tickers,
+                        lambda ticker: cached_fetch_price_history(ticker, ranking_period),
+                    )
+                # データ取得に失敗・不足した銘柄はランキング対象から除外し、後で案内する
+                for ticker in target_tickers:
+                    history = price_results[ticker]
+                    if isinstance(history, Exception) or history is None or history.empty:
+                        skipped_tickers.append(ticker)
+                    else:
+                        prices_by_ticker[ticker] = history["Close"]
 
-            if not prices_by_ticker:
-                st.error("バックテスト可能な銘柄がありませんでした。")
-                payload = None
-            else:
-                # 標準プリセット（先頭のパラメータ組）で全銘柄を横並び比較しランキング化する
-                standard_label, standard_params = strategy["presets"][0]
-                ranking_rows = run_universe_backtest_ranking(
-                    prices_by_ticker,
-                    strategy["func"],
-                    standard_params,
-                    transaction_cost_pct=transaction_cost_pct,
-                    min_days=strategy["min_days"],
-                )
-                comments = generate_ranking_comments(ranking_rows[:5], call_llm=call_llm)
-                payload = {
-                    "ranking_rows": ranking_rows,
-                    "skipped_tickers": skipped_tickers,
-                    "comments": comments,
-                    "preset_label": standard_label,
-                }
-                write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+                if not prices_by_ticker:
+                    logger.warning("一括バックテスト実行不可（対象銘柄が0件）")
+                    st.error("バックテスト可能な銘柄がありませんでした。")
+                    payload = None
+                else:
+                    # 標準プリセット（先頭のパラメータ組）で全銘柄を横並び比較しランキング化する
+                    standard_label, standard_params = strategy["presets"][0]
+                    ranking_rows = run_universe_backtest_ranking(
+                        prices_by_ticker,
+                        strategy["func"],
+                        standard_params,
+                        transaction_cost_pct=transaction_cost_pct,
+                        min_days=strategy["min_days"],
+                    )
+                    comments = generate_ranking_comments(ranking_rows[:5], call_llm=call_llm)
+                    payload = {
+                        "ranking_rows": ranking_rows,
+                        "skipped_tickers": skipped_tickers,
+                        "comments": comments,
+                        "preset_label": standard_label,
+                    }
+                    write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         if payload is not None:
             # 再実行後もランキング結果を表示し続けられるようセッションに保持する

@@ -5,6 +5,7 @@ app_tabs.sector 配下の各モジュールに委譲する。
 
 import hashlib
 import json
+import logging
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,7 @@ import streamlit as st
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm
 from prompt_patterns.sector_rotation import generate_sector_rotation_comments
 from screening.sectors import SECTOR_MAP
@@ -30,8 +32,11 @@ from app_tabs.sector.pairs_table import render_pairs_table
 from app_tabs.sector.wavelet_analysis import render_wavelet_analysis
 from app_tabs.shared import CACHE_DIR, SECTOR_DISPLAY_SETTINGS_PATH, cached_fetch_price_history
 
+logger = logging.getLogger(__name__)
+
 
 def render_sector_tab() -> None:
+    logger.info("セクターローテーションタブを表示")
     st.header("セクターローテーション")
     st.caption(
         "UNIVERSE銘柄を17業種に分類し、業種間の値動きの時差相関（リード・ラグ）を"
@@ -158,44 +163,46 @@ def render_sector_tab() -> None:
             payload = None
 
         if payload is None:
-            skipped_tickers = []
-            prices_by_ticker = {}
-            # ユニバース全銘柄の株価取得を並列化して待ち時間を短縮する
-            with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
-                price_results = map_concurrently(
-                    UNIVERSE,
-                    lambda ticker: cached_fetch_price_history(ticker, sector_period),
-                )
-            # データ取得に失敗・不足した銘柄は分析対象から除外する
-            for ticker in UNIVERSE:
-                history = price_results[ticker]
-                if isinstance(history, Exception) or history is None or history.empty:
-                    skipped_tickers.append(ticker)
-                else:
-                    prices_by_ticker[ticker] = history["Close"]
+            with log_duration(logger, f"セクターローテーション分析実行（{sector_period}）"):
+                skipped_tickers = []
+                prices_by_ticker = {}
+                # ユニバース全銘柄の株価取得を並列化して待ち時間を短縮する
+                with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
+                    price_results = map_concurrently(
+                        UNIVERSE,
+                        lambda ticker: cached_fetch_price_history(ticker, sector_period),
+                    )
+                # データ取得に失敗・不足した銘柄は分析対象から除外する
+                for ticker in UNIVERSE:
+                    history = price_results[ticker]
+                    if isinstance(history, Exception) or history is None or history.empty:
+                        skipped_tickers.append(ticker)
+                    else:
+                        prices_by_ticker[ticker] = history["Close"]
 
-            if not prices_by_ticker:
-                st.error("分析可能な銘柄がありませんでした。")
-                payload = None
-            else:
-                # 銘柄別リターンを業種別に集約し、業種間のリード・ラグ相関を算出する
-                sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
-                excluded_sectors = sorted(
-                    set(SECTOR_MAP.values()) - set(sector_returns.keys())
-                )
-                pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
-                with st.spinner("ネットワーク図データを計算中（136ペア）..."):
-                    network_pairs_df = compute_all_pairs_dominant_lag(sector_returns)
-                comments = generate_sector_rotation_comments(pairs[:5], call_llm=call_llm)
-                payload = {
-                    "pairs": pairs,
-                    "skipped_tickers": skipped_tickers,
-                    "excluded_sectors": excluded_sectors,
-                    "comments": comments,
-                    "sector_returns": serialize_sector_returns(sector_returns),
-                    "network_pairs": network_pairs_df.to_dict("records"),
-                }
-                write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+                if not prices_by_ticker:
+                    logger.warning("セクターローテーション分析実行不可（対象銘柄が0件）")
+                    st.error("分析可能な銘柄がありませんでした。")
+                    payload = None
+                else:
+                    # 銘柄別リターンを業種別に集約し、業種間のリード・ラグ相関を算出する
+                    sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
+                    excluded_sectors = sorted(
+                        set(SECTOR_MAP.values()) - set(sector_returns.keys())
+                    )
+                    pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
+                    with st.spinner("ネットワーク図データを計算中（136ペア）..."):
+                        network_pairs_df = compute_all_pairs_dominant_lag(sector_returns)
+                    comments = generate_sector_rotation_comments(pairs[:5], call_llm=call_llm)
+                    payload = {
+                        "pairs": pairs,
+                        "skipped_tickers": skipped_tickers,
+                        "excluded_sectors": excluded_sectors,
+                        "comments": comments,
+                        "sector_returns": serialize_sector_returns(sector_returns),
+                        "network_pairs": network_pairs_df.to_dict("records"),
+                    }
+                    write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         if payload is not None:
             st.session_state["sector_payload"] = payload

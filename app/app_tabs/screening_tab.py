@@ -1,10 +1,12 @@
 """スクリーニングタブ: 自然言語条件によるユニバース銘柄の絞り込み。"""
 
 import json
+import logging
 
 import streamlit as st
 
 from common.json_parsing import strip_code_fence
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm
 from data_api.stock_price_api import fetch_universe_fundamentals
 from prompt_patterns.screening import (
@@ -17,8 +19,11 @@ from screening.universe import UNIVERSE, UNIVERSE_NAMES
 
 from app_tabs.shared import CACHE_DIR, handle_table_selection
 
+logger = logging.getLogger(__name__)
+
 
 def render_screening_tab() -> None:
+    logger.info("スクリーニングタブを表示")
     st.header("銘柄スクリーニング")
 
     condition_text = st.text_input(
@@ -40,6 +45,7 @@ def render_screening_tab() -> None:
                 st.session_state["screening_filters_error"] = False
             except json.JSONDecodeError:
                 # LLMの出力が不正なJSONだった場合はエラーとして扱い、フィルタなしにする
+                logger.warning("スクリーニング条件のJSON解析に失敗しました")
                 st.session_state["screening_filters"] = None
                 st.session_state["screening_filters_error"] = True
 
@@ -54,20 +60,21 @@ def render_screening_tab() -> None:
 
             # ユニバース銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
             if st.button("この条件で絞り込む"):
-                universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
-                universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
-                    universe_df["name"]
-                )
-                universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
-                result_df = apply_filters(universe_df, filters)
-                comments = generate_screening_comments(result_df, call_llm=call_llm)
+                with log_duration(logger, "スクリーニング絞り込み実行"):
+                    universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+                    universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+                        universe_df["name"]
+                    )
+                    universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
+                    result_df = apply_filters(universe_df, filters)
+                    comments = generate_screening_comments(result_df, call_llm=call_llm)
 
-                st.session_state["screening_result_df"] = result_df
-                st.session_state["screening_comments"] = comments
-                st.session_state["screening_selected_row"] = None
-                st.session_state["screening_result_table"] = {
-                    "selection": {"rows": [], "columns": []}
-                }
+                    st.session_state["screening_result_df"] = result_df
+                    st.session_state["screening_comments"] = comments
+                    st.session_state["screening_selected_row"] = None
+                    st.session_state["screening_result_table"] = {
+                        "selection": {"rows": [], "columns": []}
+                    }
 
     # 絞り込み結果があれば、選択可能な一覧表と銘柄ごとのAIコメントを表示する
     if st.session_state.get("screening_result_df") is not None:

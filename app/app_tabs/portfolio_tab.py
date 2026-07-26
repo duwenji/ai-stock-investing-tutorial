@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 
 import pandas as pd
 import streamlit as st
@@ -10,6 +11,7 @@ from analysis_agents.news_research_agent import research_news_batch
 from analysis_agents.technical_agent import analyze_technical
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm
 from portfolio_management.review import generate_portfolio_review
 from portfolio_management.storage import load_holdings, save_holdings
@@ -25,8 +27,11 @@ from app_tabs.shared import (
     handle_table_selection,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def render_portfolio_tab() -> None:
+    logger.info("ポートフォリオタブを表示")
     st.header("保有銘柄ポートフォリオ")
 
     # 初回表示時は保存済みの保有銘柄をロードする
@@ -141,59 +146,60 @@ def render_portfolio_tab() -> None:
             payload = None
 
         if payload is None:
-            current_prices = {}
-            price_histories = {}
-            fundamentals_by_ticker = {}
-            technicals_by_ticker = {}
-            news_by_ticker = {}
+            with log_duration(logger, f"ポートフォリオレビュー生成（{len(holdings)}銘柄）"):
+                current_prices = {}
+                price_histories = {}
+                fundamentals_by_ticker = {}
+                technicals_by_ticker = {}
+                news_by_ticker = {}
 
-            def _fetch_holding_data(ticker: str):
-                """1銘柄分の株価履歴・ファンダメンタルズ・テクニカル・ニュースをまとめて取得する。
-                並列実行（map_concurrently）から呼び出される単位関数。
-                """
-                history = cached_fetch_price_history(ticker, "6mo")
-                fundamentals = cached_analyze_fundamentals(ticker)
-                technical = analyze_technical(history)
-                news = cached_fetch_news(ticker)
-                return history, fundamentals, technical, news
+                def _fetch_holding_data(ticker: str):
+                    """1銘柄分の株価履歴・ファンダメンタルズ・テクニカル・ニュースをまとめて取得する。
+                    並列実行（map_concurrently）から呼び出される単位関数。
+                    """
+                    history = cached_fetch_price_history(ticker, "6mo")
+                    fundamentals = cached_analyze_fundamentals(ticker)
+                    technical = analyze_technical(history)
+                    news = cached_fetch_news(ticker)
+                    return history, fundamentals, technical, news
 
-            # 保有銘柄すべてのデータ取得を並列化し、待ち時間を短縮する
-            holding_tickers = [holding["ticker"] for holding in holdings]
-            with st.spinner("保有銘柄データを取得中..."):
-                holding_results = map_concurrently(holding_tickers, _fetch_holding_data)
+                # 保有銘柄すべてのデータ取得を並列化し、待ち時間を短縮する
+                holding_tickers = [holding["ticker"] for holding in holdings]
+                with st.spinner("保有銘柄データを取得中..."):
+                    holding_results = map_concurrently(holding_tickers, _fetch_holding_data)
 
-            # 取得に失敗した銘柄（例外）はレビュー対象から除外する
-            for ticker in holding_tickers:
-                result = holding_results[ticker]
-                if isinstance(result, Exception):
-                    continue
-                history, fundamentals, technical, news = result
-                if not history.empty:
-                    current_prices[ticker] = float(history["Close"].iloc[-1])
-                    price_histories[ticker] = history["Close"]
-                fundamentals_by_ticker[ticker] = fundamentals
-                technicals_by_ticker[ticker] = technical
-                news_by_ticker[ticker] = news
+                # 取得に失敗した銘柄（例外）はレビュー対象から除外する
+                for ticker in holding_tickers:
+                    result = holding_results[ticker]
+                    if isinstance(result, Exception):
+                        continue
+                    history, fundamentals, technical, news = result
+                    if not history.empty:
+                        current_prices[ticker] = float(history["Close"].iloc[-1])
+                        price_histories[ticker] = history["Close"]
+                    fundamentals_by_ticker[ticker] = fundamentals
+                    technicals_by_ticker[ticker] = technical
+                    news_by_ticker[ticker] = news
 
-            # 銘柄ごとのニュースをまとめてLLMに渡し、センチメントを一括判定する
-            news_sentiment_by_ticker = research_news_batch(news_by_ticker, call_llm=call_llm)
+                # 銘柄ごとのニュースをまとめてLLMに渡し、センチメントを一括判定する
+                news_sentiment_by_ticker = research_news_batch(news_by_ticker, call_llm=call_llm)
 
-            report = generate_portfolio_review(
-                holdings,
-                current_prices,
-                price_histories,
-                fundamentals_by_ticker,
-                technicals_by_ticker,
-                news_sentiment_by_ticker,
-                names_by_ticker=candidate_names,
-                call_llm=call_llm,
-            )
-            payload = {
-                "report": report,
-                "news_by_ticker": news_by_ticker,
-                "news_sentiment_by_ticker": news_sentiment_by_ticker,
-            }
-            write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+                report = generate_portfolio_review(
+                    holdings,
+                    current_prices,
+                    price_histories,
+                    fundamentals_by_ticker,
+                    technicals_by_ticker,
+                    news_sentiment_by_ticker,
+                    names_by_ticker=candidate_names,
+                    call_llm=call_llm,
+                )
+                payload = {
+                    "report": report,
+                    "news_by_ticker": news_by_ticker,
+                    "news_sentiment_by_ticker": news_sentiment_by_ticker,
+                }
+                write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         st.markdown(payload["report"])
 
