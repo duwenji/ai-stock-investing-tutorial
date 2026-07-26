@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 
 import data_api.stock_price_api as stock_price_api
@@ -177,3 +179,24 @@ def test_fetch_universe_fundamentals_skips_ticker_that_raises_and_keeps_others(t
         tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
     )
     assert sorted(df["ticker"].tolist()) == ["AAA.T", "CCC.T"]
+
+
+def test_fetch_universe_fundamentals_logs_duration(tmp_path, caplog):
+    def fake_fetch_fundamentals(ticker_symbol):
+        return {
+            "ticker": ticker_symbol,
+            "name": ticker_symbol,
+            "trailing_pe": 10.0,
+            "price_to_book": 1.0,
+            "dividend_yield": 0.02,
+            "market_cap": 1,
+        }
+
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_universe_fundamentals(
+            ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+        )
+
+    assert "ユニバースfundamentals一括取得" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text

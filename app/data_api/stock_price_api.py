@@ -4,6 +4,7 @@
 
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -13,6 +14,9 @@ import yfinance as yf
 
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
+from common.logging_config import log_duration
+
+logger = logging.getLogger(__name__)
 
 # Yahoo!ファイナンス（日本版）のページタイトルからHTMLをパースせず銘柄名を
 # 抜き出すための簡易正規表現（フルHTMLパーサーを使うほどではないため）
@@ -103,26 +107,27 @@ def fetch_universe_fundamentals(
     if cached is not None:
         return pd.DataFrame(json.loads(cached))
 
-    # 銘柄数が多いと逐次取得は遅いため、複数銘柄を並行してAPI取得する
-    results = map_concurrently(tickers, fetch_fundamentals)
-    rows = []
-    for ticker_symbol in tickers:
-        data = results[ticker_symbol]
-        # 個別銘柄の取得失敗（例外）は全体を止めず、その銘柄だけスキップする
-        if isinstance(data, Exception):
-            continue
-        rows.append(
-            {
-                "ticker": data.get("ticker", ticker_symbol),
-                "name": data.get("name"),
-                "per": data.get("trailing_pe"),
-                "pbr": data.get("price_to_book"),
-                # yfinance's dividendYield is already a percentage number
-                # (e.g. 3.45 means 3.45%), not a fraction to scale up.
-                "dividend_yield_pct": data.get("dividend_yield"),
-                "market_cap": data.get("market_cap"),
-            }
-        )
-    df = pd.DataFrame(rows)
-    write_cache(cache_dir, cache_key, df.to_json(orient="records", force_ascii=False))
+    with log_duration(logger, f"ユニバースfundamentals一括取得（{len(tickers)}銘柄）"):
+        # 銘柄数が多いと逐次取得は遅いため、複数銘柄を並行してAPI取得する
+        results = map_concurrently(tickers, fetch_fundamentals)
+        rows = []
+        for ticker_symbol in tickers:
+            data = results[ticker_symbol]
+            # 個別銘柄の取得失敗（例外）は全体を止めず、その銘柄だけスキップする
+            if isinstance(data, Exception):
+                continue
+            rows.append(
+                {
+                    "ticker": data.get("ticker", ticker_symbol),
+                    "name": data.get("name"),
+                    "per": data.get("trailing_pe"),
+                    "pbr": data.get("price_to_book"),
+                    # yfinance's dividendYield is already a percentage number
+                    # (e.g. 3.45 means 3.45%), not a fraction to scale up.
+                    "dividend_yield_pct": data.get("dividend_yield"),
+                    "market_cap": data.get("market_cap"),
+                }
+            )
+        df = pd.DataFrame(rows)
+        write_cache(cache_dir, cache_key, df.to_json(orient="records", force_ascii=False))
     return df
