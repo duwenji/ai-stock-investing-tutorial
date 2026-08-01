@@ -40,6 +40,7 @@ app/strategy_builder/
   storage.py      # 戦略JSONの保存・読込（portfolio_management/storage.py と同パターン）
   conditions.py   # 戦略JSON条件の適用・並び替え・判定理由の生成
   backtest.py     # 簡易バックテスト（等金額購入シミュレーション）
+  sector_insight.py  # 業種ローテーションからの注目銘柄提案（機能①用）
 app/prompt_patterns/strategy_dialogue.py  # 対話用ペルソナ・プロンプト構築・応答解析
 app/app_tabs/strategy_builder_tab.py      # タブUI本体
 app/data/strategies.json                  # 確定済み戦略の保存先（新規、holdings.json同様に未コミット運用）
@@ -70,6 +71,33 @@ app/data/strategies.json                  # 確定済み戦略の保存先（新
 - テンプレートボタン3つ（「バリュー株」「グロース株」「配当株」）: クリックで
   `session_state["strategy_idea_text"]` に定型文を設定し `st.rerun()` して反映
 - 「対話を始める」ボタンで、この文言を対話の最初のユーザー発言として機能②を開始
+
+### 業種ローテーション提案（4つ目のボタン）
+
+テンプレートボタンに加え、「業種ローテーションから本日の注目銘柄を提案」ボタンを設置する。
+既存のセクターローテーション分析（業種間ネットワーク図の元データ）を再利用し、
+本日値上がりした業種と、過去のリード・ラグ関係から追随が見込まれる業種の銘柄を
+自動的に洗い出す。追加のAPI呼び出しは発生しない（業種分析時に取得済みの株価データを使う）。
+
+- `st.session_state.get("sector_payload")` が無ければ、機能④と同じ
+  `run_or_load_sector_rotation(period, force_regenerate)` の実行を促す
+- ある場合、`app/strategy_builder/sector_insight.py` の以下の関数を使い、
+  「本日値上がりした銘柄」→「その銘柄の業種が先行し、追随すると見られる業種」→
+  「その追随業種に属するUNIVERSE銘柄」の順で候補を求める:
+  - `find_top_gaining_tickers(ticker_latest_return_pct, top_n=5) -> list[dict]`:
+    直近日次リターン降順で上位銘柄を返す
+  - `find_dominant_lagging_sector(network_pairs, leading_sector, coherence_threshold=0.5) -> dict | None`:
+    指定業種が`leading_sector`となるペアを全周期帯から探し、`mean_coherence`最大のものを返す
+  - `build_watchlist_from_rotation(...) -> dict`: 上記を組み合わせ、
+    `{"idea_text": str, "candidates": list[dict]}`（`candidates`は
+    銘柄コード・銘柄名・現在株価・先行業種・遅行日数・周期帯を含む）を返す。
+    該当なしの場合は `idea_text=None` を返す
+- 生成された `idea_text` を「この案をアイデア欄に反映」ボタンでテキストエリアに反映し、
+  `candidates` は `st.dataframe` の候補銘柄一覧として常時表示する（対話に進むかは
+  ユーザーの任意）
+- `run_or_load_sector_rotation` の戻り値（`sector_payload`）に、業種集計前の
+  銘柄別直近日次リターン `ticker_latest_return_pct: dict[str, float]` を追加する
+  （業種別リターン集計時に使う`prices_by_ticker`から同時に算出する。追加のデータ取得は不要）
 
 ## 機能② AI協調型ロジック構築エンジン
 
@@ -188,6 +216,10 @@ app/data/strategies.json                  # 確定済み戦略の保存先（新
   indicator/operatorの組み合わせ、`sort_by_strategy`、`build_match_reason`の文字列生成
 - `tests/test_strategy_builder_backtest.py`: 合成した複数銘柄の株価Seriesで累積リターン・
   最大ドローダウン・勝率を既知の値で検証し、銘柄ごとに開始日が異なる場合の整合性を確認する
+- `tests/test_strategy_builder_sector_insight.py`: `find_top_gaining_tickers`が
+  リターン降順に並ぶこと、`find_dominant_lagging_sector`が全周期帯からコヒーレンス最大の
+  ペアを選ぶこと、`build_watchlist_from_rotation`が該当ペアなしの場合に
+  `idea_text=None`を返すこと
 - 既存 `tests/test_stock_price_api.py` に `fetch_universe_price_histories` のテストと、
   `fetch_fundamentals`のROE/売上高伸び率追加分のテストケースを追加する
 
