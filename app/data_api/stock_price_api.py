@@ -55,6 +55,21 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
     return result
 
 
+def fetch_company_profile(ticker_symbol: str) -> dict:
+    """指定銘柄の業種・事業内容をyfinance経由で取得する。"""
+    logger.info("company profileリクエスト: ticker=%s", ticker_symbol)
+    ticker = yf.Ticker(ticker_symbol)
+    info = ticker.info
+    result = {
+        "ticker": ticker_symbol,
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "business_summary": info.get("longBusinessSummary"),
+    }
+    logger.info("company profileレスポンス: ticker=%s data=%s", ticker_symbol, result)
+    return result
+
+
 def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
     """指定銘柄に関連する最新ニュースを取得し、表示に必要な項目だけに整形する。"""
     logger.info("newsリクエスト: ticker=%s limit=%s", ticker_symbol, limit)

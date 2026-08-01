@@ -23,6 +23,9 @@ class FakeTicker:
             "marketCap": 1_000_000,
             "returnOnEquity": 0.155,
             "revenueGrowth": 0.082,
+            "sector": "Consumer Cyclical",
+            "industry": "Auto Manufacturers",
+            "longBusinessSummary": "Test business summary text.",
         }
 
     @property
@@ -349,3 +352,30 @@ def test_fetch_japanese_name_logs_warning_on_request_failure(monkeypatch, caplog
         stock_price_api.fetch_japanese_name("6753.T")
 
     assert "日本語銘柄名取得失敗: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
+
+
+def test_fetch_company_profile_maps_info_fields(monkeypatch):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    result = stock_price_api.fetch_company_profile("7203.T")
+    assert result["ticker"] == "7203.T"
+    assert result["sector"] == "Consumer Cyclical"
+    assert result["industry"] == "Auto Manufacturers"
+    assert result["business_summary"] == "Test business summary text."
+
+
+def test_fetch_company_profile_missing_fields_return_none(monkeypatch):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", EmptyInfoTicker)
+    result = stock_price_api.fetch_company_profile("7203.T")
+    assert result["sector"] is None
+    assert result["industry"] is None
+    assert result["business_summary"] is None
+
+
+def test_fetch_company_profile_logs_request_and_response(monkeypatch, caplog):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_company_profile("7203.T")
+
+    assert "company profileリクエスト: ticker=7203.T" in caplog.text
+    assert "company profileレスポンス: ticker=7203.T" in caplog.text
+    assert "Auto Manufacturers" in caplog.text
