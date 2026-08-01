@@ -1,6 +1,7 @@
 import logging
 
 import pandas as pd
+import pytest
 
 import data_api.stock_price_api as stock_price_api
 
@@ -20,6 +21,8 @@ class FakeTicker:
             "priceToBook": 1.1,
             "dividendYield": 0.02,
             "marketCap": 1_000_000,
+            "returnOnEquity": 0.155,
+            "revenueGrowth": 0.082,
         }
 
     @property
@@ -69,6 +72,8 @@ def test_fetch_fundamentals_maps_info_fields(monkeypatch):
     assert result["price_to_book"] == 1.1
     assert result["dividend_yield"] == 0.02
     assert result["market_cap"] == 1_000_000
+    assert result["return_on_equity"] == 0.155
+    assert result["revenue_growth"] == 0.082
 
 
 def test_fetch_fundamentals_missing_fields_return_none(monkeypatch):
@@ -76,6 +81,8 @@ def test_fetch_fundamentals_missing_fields_return_none(monkeypatch):
     result = stock_price_api.fetch_fundamentals("7203.T")
     assert result["trailing_pe"] is None
     assert result["price_to_book"] is None
+    assert result["return_on_equity"] is None
+    assert result["revenue_growth"] is None
 
 
 def test_fetch_news_returns_title_publisher_and_link(monkeypatch):
@@ -159,6 +166,46 @@ def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
     )
     assert call_count["n"] == 2
     assert df1["ticker"].tolist() == df2["ticker"].tolist()
+
+
+def test_fetch_universe_fundamentals_converts_roe_and_revenue_growth_to_pct(tmp_path):
+    def fake_fetch_fundamentals(ticker_symbol):
+        return {
+            "ticker": ticker_symbol,
+            "name": ticker_symbol,
+            "trailing_pe": 10.0,
+            "price_to_book": 1.0,
+            "dividend_yield": 0.02,
+            "market_cap": 1,
+            "return_on_equity": 0.155,
+            "revenue_growth": 0.082,
+        }
+
+    df = stock_price_api.fetch_universe_fundamentals(
+        ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+    )
+    assert df["roe_pct"].tolist() == pytest.approx([15.5])
+    assert df["revenue_growth_pct"].tolist() == pytest.approx([8.2])
+
+
+def test_fetch_universe_fundamentals_handles_missing_roe_and_revenue_growth(tmp_path):
+    def fake_fetch_fundamentals(ticker_symbol):
+        return {
+            "ticker": ticker_symbol,
+            "name": ticker_symbol,
+            "trailing_pe": 10.0,
+            "price_to_book": 1.0,
+            "dividend_yield": 0.02,
+            "market_cap": 1,
+            "return_on_equity": None,
+            "revenue_growth": None,
+        }
+
+    df = stock_price_api.fetch_universe_fundamentals(
+        ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+    )
+    assert df["roe_pct"].iloc[0] is None or pd.isna(df["roe_pct"].iloc[0])
+    assert df["revenue_growth_pct"].iloc[0] is None or pd.isna(df["revenue_growth_pct"].iloc[0])
 
 
 def test_fetch_universe_fundamentals_skips_ticker_that_raises_and_keeps_others(tmp_path):

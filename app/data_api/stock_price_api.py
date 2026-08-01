@@ -37,7 +37,7 @@ def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
 
 
 def fetch_fundamentals(ticker_symbol: str) -> dict:
-    """指定銘柄のファンダメンタルズ指標（PER・PBR・配当利回り等）を取得する。"""
+    """指定銘柄のファンダメンタルズ指標（PER・PBR・配当利回り・ROE・売上高伸び率等）を取得する。"""
     logger.info("fundamentalsリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
@@ -48,6 +48,8 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
         "price_to_book": info.get("priceToBook"),
         "dividend_yield": info.get("dividendYield"),
         "market_cap": info.get("marketCap"),
+        "return_on_equity": info.get("returnOnEquity"),
+        "revenue_growth": info.get("revenueGrowth"),
     }
     logger.info("fundamentalsレスポンス: ticker=%s data=%s", ticker_symbol, result)
     return result
@@ -104,6 +106,11 @@ def fetch_japanese_name(ticker_symbol: str) -> str | None:
     return name or None
 
 
+def _to_pct(value: float | None) -> float | None:
+    """yfinanceが小数（例: 0.155 = 15.5%）で返す指標を、パーセント表示用に100倍する。"""
+    return None if value is None else value * 100
+
+
 def fetch_universe_fundamentals(
     tickers: list[str],
     cache_dir: Path,
@@ -141,6 +148,10 @@ def fetch_universe_fundamentals(
                     # (e.g. 3.45 means 3.45%), not a fraction to scale up.
                     "dividend_yield_pct": data.get("dividend_yield"),
                     "market_cap": data.get("market_cap"),
+                    # returnOnEquity/revenueGrowthは小数（例: 0.155 = 15.5%）で
+                    # 返るため、dividend_yieldと異なり100倍してパーセント表示用にする。
+                    "roe_pct": _to_pct(data.get("return_on_equity")),
+                    "revenue_growth_pct": _to_pct(data.get("revenue_growth")),
                 }
             )
         df = pd.DataFrame(rows)
