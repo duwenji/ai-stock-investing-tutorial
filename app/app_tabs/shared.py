@@ -70,6 +70,14 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
 
     st.subheader(f"{ticker} {detail.get('name') or ''}")
 
+    profile = detail.get("profile") or {}
+    st.subheader("基本情報")
+    profile_col1, profile_col2 = st.columns(2)
+    profile_col1.write(f"業種: {profile.get('sector') or '―'}")
+    profile_col2.write(f"詳細業種: {profile.get('industry') or '―'}")
+    st.caption("AIによる市場ポジション・強みの要約")
+    st.write(profile.get("profile_comment") or "―")
+
     price_history = detail["price_history"]
     if price_history["dates"]:
         chart_df = pd.DataFrame(
