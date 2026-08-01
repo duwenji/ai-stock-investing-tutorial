@@ -5,52 +5,7 @@ import streamlit as st
 
 from sector_analysis.network import build_mermaid_lead_lag_graph
 
-
-def _render_mermaid(code: str, height: int = 400) -> None:
-    """Mermaidコード文字列を、CDN経由のmermaid.js + svg-pan-zoom.jsを使って
-    ドラッグパン・ホイールズーム可能なHTML埋め込みとして描画する。"""
-    html = f"""
-    <style>
-      html, body {{ margin: 0; padding: 0; height: 100%; }}
-      .mermaid {{ width: 100%; height: 100%; }}
-      .mermaid svg {{
-        width: 100% !important;
-        height: 100% !important;
-        max-width: none !important;
-      }}
-    </style>
-    <div class="mermaid">{code}</div>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3/dist/svg-pan-zoom.min.js"></script>
-    <script>
-      mermaid.initialize({{ startOnLoad: false }});
-      mermaid.run({{ querySelector: ".mermaid" }}).then(function () {{
-        var svgEl = document.querySelector(".mermaid svg");
-        if (svgEl) {{
-          var pz = svgPanZoom(svgEl, {{
-            zoomEnabled: true,
-            controlIconsEnabled: true,
-            fit: false,
-            center: true,
-          }});
-          // 業種間ネットワーク図はflowchart LRのため横に広がりやすく、
-          // 単純なfit（縦横とも収まる最大倍率）だと幅で頭打ちになり、
-          // 高さを増やしても余白が増えるだけになる。縦方向を優先して
-          // 拡大しつつ、疎な（ノードが少ない）図で拡大しすぎないよう
-          // 「全体表示時の倍率の2倍」を上限にする。はみ出した部分は
-          // ドラッグ・ホイールで閲覧できる。
-          var sizes = pz.getSizes();
-          if (sizes.viewBox.height > 0 && sizes.viewBox.width > 0) {{
-            var scaleToHeight = sizes.height / sizes.viewBox.height;
-            var scaleToWidth = sizes.width / sizes.viewBox.width;
-            pz.zoom(Math.min(scaleToHeight, scaleToWidth * 2));
-            pz.center();
-          }}
-        }}
-      }});
-    </script>
-    """
-    st.iframe(html, height=height)
+from app_tabs.shared import render_mermaid
 
 
 def render_network_diagram(network_pairs: list[dict], height: int) -> None:
@@ -91,4 +46,4 @@ def render_network_diagram(network_pairs: list[dict], height: int) -> None:
             "十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。"
         )
     else:
-        _render_mermaid(mermaid_code, height=height)
+        render_mermaid(mermaid_code, height=height)
