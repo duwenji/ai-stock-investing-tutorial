@@ -19,6 +19,7 @@ from app_tabs.portfolio_tab import render_portfolio_tab
 from app_tabs.ranking_tab import render_ranking_tab
 from app_tabs.screening_tab import render_screening_tab
 from app_tabs.sector import render_sector_tab
+from app_tabs.strategy_builder_tab import render_strategy_builder_tab
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -37,9 +38,18 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-# 5つの主要機能をタブとして構成する
-tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector = st.tabs(
-    ["ポートフォリオ", "スクリーニング", "バックテスト", "一括バックテスト", "セクターローテーション"]
+# 6つの主要機能をタブとして構成する
+tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector, tab_strategy_builder = (
+    st.tabs(
+        [
+            "ポートフォリオ",
+            "スクリーニング",
+            "バックテスト",
+            "一括バックテスト",
+            "セクターローテーション",
+            "AI戦略ビルダー",
+        ]
+    )
 )
 
 with tab_portfolio:
@@ -56,3 +66,6 @@ with tab_ranking:
 
 with tab_sector:
     render_sector_tab()
+
+with tab_strategy_builder:
+    render_strategy_builder_tab()
