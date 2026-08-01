@@ -1,5 +1,6 @@
 """個別銘柄の詳細画面向けに、株価・ファンダメンタルズ・テクニカル分析・
-ニュース・LLMによる講評コメントを1つにまとめて生成するモジュール。"""
+ニュース・LLMによる講評コメント・基本情報（業種・市場ポジション）を
+1つにまとめて生成するモジュール。"""
 
 import json
 import logging
@@ -12,11 +13,14 @@ from analysis_agents.technical_agent import analyze_technical as default_analyze
 from common.cache import read_cache, write_cache
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm as default_call_llm
+from data_api.stock_price_api import fetch_company_profile as default_fetch_company_profile
 from data_api.stock_price_api import fetch_news as default_fetch_news
 from data_api.stock_price_api import fetch_price_history as default_fetch_price_history
-from prompt_patterns.stock_detail import build_stock_detail_prompt
+from prompt_patterns.stock_detail import build_company_profile_prompt, build_stock_detail_prompt
 
 logger = logging.getLogger(__name__)
+
+_NO_PROFILE_MESSAGE = "事業内容の情報が取得できませんでした。"
 
 
 def generate_stock_detail(
@@ -28,6 +32,7 @@ def generate_stock_detail(
     fetch_news=default_fetch_news,
     analyze_fundamentals=default_analyze_fundamentals,
     analyze_technical=default_analyze_technical,
+    fetch_company_profile=default_fetch_company_profile,
 ) -> dict:
     """指定銘柄の詳細情報一式を組み立てる。
 
@@ -35,12 +40,13 @@ def generate_stock_detail(
     テスト時にモック差し替えしやすくしている。
     """
     # 生成にはLLM呼び出しを含みコストが高いため、キャッシュがあれば再利用する。
-    # 旧バージョンのキャッシュ（price_historyにopenキーが無いもの）は無効として扱う。
+    # 旧バージョンのキャッシュ（price_historyにopenキーが無い、またはprofile
+    # キーが無いもの）は無効として扱う。
     cache_key = f"stock-detail-{ticker}"
     cached = read_cache(cache_dir, cache_key)
     if cached is not None:
         payload = json.loads(cached)
-        if "open" in payload["price_history"]:
+        if "open" in payload["price_history"] and "profile" in payload:
             return payload
 
     with log_duration(logger, f"銘柄詳細生成（{ticker}）"):
@@ -50,6 +56,7 @@ def generate_stock_detail(
         fundamentals = analyze_fundamentals(ticker)
         technical = analyze_technical(history)
         news = fetch_news(ticker)
+        company_profile = fetch_company_profile(ticker)
 
         # チャート描画用に、pandasのDataFrameをJSONシリアライズ可能な
         # プレーンな辞書（日付文字列＋各系列のリスト）に変換する
@@ -72,6 +79,20 @@ def generate_stock_detail(
         prompt = build_stock_detail_prompt(ticker, name, fundamentals, technical, news)
         comment = call_llm(prompt)
 
+        # 事業内容の説明が無ければLLMを呼ばず、固定メッセージにする
+        business_summary = company_profile.get("business_summary")
+        if business_summary:
+            profile_prompt = build_company_profile_prompt(
+                ticker,
+                name,
+                company_profile.get("sector"),
+                company_profile.get("industry"),
+                business_summary,
+            )
+            profile_comment = call_llm(profile_prompt)
+        else:
+            profile_comment = _NO_PROFILE_MESSAGE
+
         payload = {
             "ticker": ticker,
             "name": name,
@@ -80,6 +101,11 @@ def generate_stock_detail(
             "technical": technical,
             "news": news,
             "comment": comment,
+            "profile": {
+                "sector": company_profile.get("sector"),
+                "industry": company_profile.get("industry"),
+                "profile_comment": profile_comment,
+            },
         }
         write_cache(cache_dir, cache_key, json.dumps(payload, ensure_ascii=False))
         return payload
