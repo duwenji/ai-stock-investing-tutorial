@@ -51,3 +51,4 @@
 - [docs/06-real-world-examples/01-daily-market-report-tool.md](docs/06-real-world-examples/01-daily-market-report-tool.md) - 日次マーケットレポート自動生成
 - [docs/06-real-world-examples/02-screening-dashboard.md](docs/06-real-world-examples/02-screening-dashboard.md) - スクリーニングダッシュボード
 - [docs/06-real-world-examples/03-portfolio-advisor-agent.md](docs/06-real-world-examples/03-portfolio-advisor-agent.md) - 統合ポートフォリオアドバイザー
+- [docs/06-real-world-examples/04-strategy-builder-agent.md](docs/06-real-world-examples/04-strategy-builder-agent.md) - AI戦略ビルダーエージェント

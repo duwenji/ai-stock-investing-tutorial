@@ -214,4 +214,4 @@ if __name__ == "__main__":
 
 投資判断に関わる内容です。必ず [免責事項](../../DISCLAIMER.md) をご確認ください。
 
-[← 前へ: スクリーニングダッシュボード](02-screening-dashboard.md) | [トップに戻る →](../../README.md)
+[← 前へ: スクリーニングダッシュボード](02-screening-dashboard.md) | [次へ: AI戦略ビルダーエージェント →](04-strategy-builder-agent.md)
