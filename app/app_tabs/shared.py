@@ -1,7 +1,11 @@
 """複数タブ間で共有するキャッシュ付きデータ取得関数・銘柄詳細ダイアログ・
-テーブル選択ヘルパー、および保存先パスの定数。
+テーブル選択ヘルパー・セクターローテーション分析の共通実行処理、
+および保存先パスの定数。
 """
 
+import hashlib
+import json
+import logging
 from pathlib import Path
 
 import altair as alt
@@ -9,10 +13,20 @@ import pandas as pd
 import streamlit as st
 
 from analysis_agents.fundamental_agent import analyze_fundamentals
+from common.cache import read_cache, write_cache
+from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
+from common.logging_config import log_duration
 from data_api.llm_client import call_llm
 from data_api.stock_price_api import fetch_japanese_name, fetch_news, fetch_price_history
+from prompt_patterns.sector_rotation import generate_sector_rotation_comments
+from screening.sectors import SECTOR_MAP
+from screening.universe import UNIVERSE
+from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
+from sector_analysis.wavelet import compute_all_pairs_dominant_lag, serialize_sector_returns
 from stock_detail.detail import generate_stock_detail
+
+logger = logging.getLogger(__name__)
 
 # 保有銘柄データやAPI取得結果のキャッシュを保存するディレクトリ構成
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -222,3 +236,73 @@ def render_mermaid(code: str, height: int = 400) -> None:
     </script>
     """
     st.iframe(html, height=height)
+
+
+def run_or_load_sector_rotation(period: str, force_regenerate: bool) -> dict | None:
+    """セクターローテーション分析を実行または既存キャッシュから読み込み、
+    ペイロード（pairs/sector_returns/network_pairs/comments/
+    ticker_latest_return_pct等）を返す。分析可能な銘柄が1件もない場合はNoneを返す。
+
+    セクタータブ・AI戦略ビルダータブの両方から呼ばれる共通処理。同一の
+    period・UNIVERSEであればディスクキャッシュを共有し、二重計算を避ける。
+    実行結果は st.session_state["sector_payload"] にも保存する。
+    """
+    cache_key = "sector-rotation-" + hashlib.sha256(
+        f"{period}-{'-'.join(sorted(UNIVERSE))}".encode("utf-8")
+    ).hexdigest()[:12]
+    cached_payload = None if force_regenerate else read_cache(CACHE_DIR, cache_key)
+    payload = json.loads(cached_payload) if cached_payload is not None else None
+    if payload is not None and (
+        "sector_returns" not in payload
+        or "network_pairs" not in payload
+        or "ticker_latest_return_pct" not in payload
+    ):
+        # 旧スキーマ（ticker_latest_return_pct未保存等）のキャッシュは再計算して移行する
+        payload = None
+
+    if payload is None:
+        with log_duration(logger, f"セクターローテーション分析実行（{period}）"):
+            skipped_tickers = []
+            prices_by_ticker = {}
+            with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
+                price_results = map_concurrently(
+                    UNIVERSE, lambda ticker: cached_fetch_price_history(ticker, period)
+                )
+            for ticker in UNIVERSE:
+                history = price_results[ticker]
+                if isinstance(history, Exception) or history is None or history.empty:
+                    skipped_tickers.append(ticker)
+                else:
+                    prices_by_ticker[ticker] = history["Close"]
+
+            if not prices_by_ticker:
+                logger.warning("セクターローテーション分析実行不可（対象銘柄が0件）")
+                return None
+
+            # 業種集計前の銘柄別直近日次リターン（AI戦略ビルダーの
+            # 「本日の値上がり銘柄」検出に使う）
+            ticker_latest_return_pct: dict[str, float] = {}
+            for ticker, prices in prices_by_ticker.items():
+                daily_returns = prices.pct_change()
+                if len(daily_returns) >= 2 and pd.notna(daily_returns.iloc[-1]):
+                    ticker_latest_return_pct[ticker] = float(daily_returns.iloc[-1] * 100)
+
+            sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
+            excluded_sectors = sorted(set(SECTOR_MAP.values()) - set(sector_returns.keys()))
+            pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
+            with st.spinner("ネットワーク図データを計算中（136ペア）..."):
+                network_pairs_df = compute_all_pairs_dominant_lag(sector_returns)
+            comments = generate_sector_rotation_comments(pairs[:5], call_llm=call_llm)
+            payload = {
+                "pairs": pairs,
+                "skipped_tickers": skipped_tickers,
+                "excluded_sectors": excluded_sectors,
+                "comments": comments,
+                "sector_returns": serialize_sector_returns(sector_returns),
+                "network_pairs": network_pairs_df.to_dict("records"),
+                "ticker_latest_return_pct": ticker_latest_return_pct,
+            }
+            write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
+
+    st.session_state["sector_payload"] = payload
+    return payload
