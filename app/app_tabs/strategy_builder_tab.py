@@ -68,11 +68,19 @@ def _render_sector_rotation_suggestion() -> None:
             )
             return
 
+        band_choice = st.selectbox(
+            "周期帯",
+            ["すべて（自動選択）", "短期", "中期", "長期"],
+            key="strategy_watchlist_band",
+        )
+        band = None if band_choice == "すべて（自動選択）" else band_choice
+
         watchlist = build_watchlist_from_rotation(
             payload.get("ticker_latest_return_pct", {}),
             payload.get("network_pairs", []),
             SECTOR_MAP,
             UNIVERSE_NAMES,
+            band=band,
         )
         if watchlist["idea_text"] is None:
             st.info("十分な確信度を持つ業種間の関係が見つかりませんでした。")

@@ -24,16 +24,21 @@ def find_dominant_lagging_sector(
     network_pairs: list[dict],
     leading_sector: str,
     coherence_threshold: float = 0.5,
+    band: str | None = None,
 ) -> dict | None:
     """指定業種が先行業種（leading_sector）となるペアの中から、
     コヒーレンス（mean_coherence）が閾値以上でもっとも高いものを返す。
     該当ペアが無ければNoneを返す。
+
+    bandを指定すると、その周期帯（短期/中期/長期）のペアのみを対象にする。
+    Noneの場合は全周期帯を横断してもっともコヒーレンスの高いペアを選ぶ。
     """
     candidates = [
         pair
         for pair in network_pairs
         if pair.get("leading_sector") == leading_sector
         and pair.get("mean_coherence", 0) >= coherence_threshold
+        and (band is None or pair.get("band") == band)
     ]
     if not candidates:
         return None
@@ -47,11 +52,14 @@ def build_watchlist_from_rotation(
     universe_names: dict[str, str],
     top_n: int = 5,
     coherence_threshold: float = 0.5,
+    band: str | None = None,
 ) -> dict:
     """本日の値上がり銘柄→先行業種→追随業種→候補銘柄、の順に洗い出し、
     投資アイデア文と候補銘柄一覧を返す。
 
     値上がり上位銘柄を順に試し、先行・追随関係が見つかった最初の1件を採用する。
+    bandを指定すると、その周期帯（短期/中期/長期）のみを対象に先行・追随関係を
+    探す（Noneの場合は全周期帯から自動選択する）。
     該当する関係が1件も見つからない場合は
     `{"idea_text": None, "candidates": []}` を返す。
     """
@@ -62,7 +70,7 @@ def build_watchlist_from_rotation(
         if leading_sector is None:
             continue
         pair = find_dominant_lagging_sector(
-            network_pairs, leading_sector, coherence_threshold=coherence_threshold
+            network_pairs, leading_sector, coherence_threshold=coherence_threshold, band=band
         )
         if pair is None:
             continue

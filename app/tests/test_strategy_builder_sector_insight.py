@@ -36,6 +36,26 @@ def test_find_dominant_lagging_sector_returns_none_below_threshold():
     assert find_dominant_lagging_sector(pairs, "銀行", coherence_threshold=0.5) is None
 
 
+def test_find_dominant_lagging_sector_filters_by_band_when_given():
+    pairs = [
+        {"leading_sector": "銀行", "lagging_sector": "保険", "band": "短期",
+         "mean_coherence": 0.4, "lag_days_abs": 2.0},
+        {"leading_sector": "銀行", "lagging_sector": "保険", "band": "中期",
+         "mean_coherence": 0.9, "lag_days_abs": 5.2},
+    ]
+    result = find_dominant_lagging_sector(pairs, "銀行", coherence_threshold=0.3, band="短期")
+    assert result["band"] == "短期"
+    assert result["mean_coherence"] == 0.4
+
+
+def test_find_dominant_lagging_sector_returns_none_when_band_has_no_match():
+    pairs = [
+        {"leading_sector": "銀行", "lagging_sector": "保険", "band": "中期",
+         "mean_coherence": 0.9, "lag_days_abs": 5.2},
+    ]
+    assert find_dominant_lagging_sector(pairs, "銀行", coherence_threshold=0.3, band="短期") is None
+
+
 def test_find_dominant_lagging_sector_returns_none_when_no_pairs_for_sector():
     pairs = [
         {"leading_sector": "保険", "lagging_sector": "銀行", "band": "短期",
@@ -67,6 +87,23 @@ def test_build_watchlist_from_rotation_returns_candidates_and_idea_text():
     assert "電気機器" in result["idea_text"]
     assert {c["ticker"] for c in result["candidates"]} == {"6758.T", "6501.T"}
     assert result["candidates"][0]["leading_sector"] == "輸送用機器"
+
+
+def test_build_watchlist_from_rotation_respects_band_filter():
+    ticker_latest_return_pct = {"7203.T": 3.5}
+    network_pairs = [
+        {"leading_sector": "輸送用機器", "lagging_sector": "電気機器", "band": "短期",
+         "mean_coherence": 0.9, "lag_days_abs": 1.0},
+        {"leading_sector": "輸送用機器", "lagging_sector": "銀行", "band": "長期",
+         "mean_coherence": 0.9, "lag_days_abs": 20.0},
+    ]
+    sector_map = {"7203.T": "輸送用機器", "6758.T": "電気機器", "8306.T": "銀行"}
+
+    result = build_watchlist_from_rotation(
+        ticker_latest_return_pct, network_pairs, sector_map, {}, band="長期"
+    )
+
+    assert {c["ticker"] for c in result["candidates"]} == {"8306.T"}
 
 
 def test_build_watchlist_from_rotation_returns_none_idea_when_no_pair_found():
