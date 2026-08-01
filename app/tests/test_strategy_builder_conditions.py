@@ -52,6 +52,25 @@ def test_apply_strategy_conditions_supports_equals_operator():
     assert result["ticker"].tolist() == ["AAA"]
 
 
+def test_apply_strategy_conditions_supports_sector_equals():
+    df = pd.DataFrame(
+        [
+            {"ticker": "AAA", "sector": "電気機器"},
+            {"ticker": "BBB", "sector": "銀行"},
+        ]
+    )
+    strategy = {"conditions": [{"indicator": "SECTOR", "operator": "EQUALS", "value": "電気機器"}]}
+    result = apply_strategy_conditions(df, strategy)
+    assert result["ticker"].tolist() == ["AAA"]
+
+
+def test_build_match_reason_includes_sector():
+    row = pd.Series({"sector": "電気機器"})
+    conditions = [{"indicator": "SECTOR", "operator": "EQUALS", "value": "電気機器"}]
+    reason = build_match_reason(row, conditions)
+    assert reason == "業種 電気機器（条件: 電気機器と一致）"
+
+
 def test_sort_by_strategy_sorts_descending_by_indicator():
     df = pd.DataFrame([{"ticker": "AAA", "roe_pct": 5.0}, {"ticker": "BBB", "roe_pct": 15.0}])
     strategy = {"sort_by": "ROE", "order": "DESC"}

@@ -20,6 +20,22 @@ def test_build_dialogue_prompt_includes_full_history_in_order():
     assert user_pos < assistant_pos < second_user_pos
 
 
+def test_build_dialogue_prompt_includes_sector_list_when_given():
+    prompt = build_dialogue_prompt(
+        [{"role": "user", "content": "電気機器の値上がり銘柄に注目したい"}],
+        sectors=["電気機器", "銀行"],
+    )
+    assert "SECTOR" in prompt
+    assert "電気機器" in prompt
+    assert "銀行" in prompt
+
+
+def test_build_dialogue_prompt_omits_sector_list_when_not_given():
+    prompt = build_dialogue_prompt([{"role": "user", "content": "PERが低い銘柄"}])
+    assert "SECTOR" in prompt  # indicatorとしての説明自体は常に含まれる
+    assert "業種名のいずれか一つ" not in prompt  # 業種一覧の案内文は含まれない
+
+
 def test_parse_dialogue_response_detects_finalized_strategy_json():
     raw = (
         '```json\n{"strategy_name": "割安株", "conditions": '

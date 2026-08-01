@@ -159,7 +159,7 @@ def _render_dialogue_section() -> None:
     # （直前にAIの質問を表示済み、あるいは確定候補を表示中の再実行で
     # 重複してLLMを呼ばないようにするための判定）
     if history[-1]["role"] == "user" and pending is None:
-        prompt = build_dialogue_prompt(history)
+        prompt = build_dialogue_prompt(history, sectors=sorted(set(SECTOR_MAP.values())))
         with st.spinner("AIが回答を考えています..."):
             raw = call_llm(prompt)
         parsed = parse_dialogue_response(raw)
@@ -220,6 +220,7 @@ def _render_backtest_section() -> None:
             universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                 universe_df["name"]
             )
+            universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
             matched_df = apply_strategy_conditions(universe_df, strategy)
             matched_tickers = matched_df["ticker"].tolist()
 
@@ -321,6 +322,7 @@ def _render_screening_section() -> None:
             universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                 universe_df["name"]
             )
+            universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
             matched_df = apply_strategy_conditions(universe_df, strategy)
             matched_df = sort_by_strategy(matched_df, strategy)
             matched_df = matched_df.copy()

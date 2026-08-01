@@ -35,21 +35,36 @@ _PERSONA_INSTRUCTIONS = """\
   "order": "DESC"
 }
 ```
-indicatorはPER, PBR, ROE, DIVIDEND_YIELD, REVENUE_GROWTH, MARKET_CAPのいずれか、
+indicatorはPER, PBR, ROE, DIVIDEND_YIELD, REVENUE_GROWTH, MARKET_CAP, SECTORのいずれか、
 operatorはLESS_THAN, LESS_EQUAL, GREATER_THAN, GREATER_EQUAL, EQUALSのいずれかを使ってください。
+SECTORのoperatorはEQUALSのみ使用し、ユーザーの発言や提案文で業種名が挙げられている場合は
+条件に含めることを検討してください。
 """
 
 
-def build_dialogue_prompt(history: list[dict]) -> str:
+def build_dialogue_prompt(history: list[dict], sectors: list[str] | None = None) -> str:
     """会話履歴（[{"role": "user"|"assistant", "content": str}, ...]）から、
     ペルソナ指示と会話全文を含む1回分のLLM呼び出し用プロンプトを組み立てる。
+
+    sectorsを渡すと、SECTOR条件のvalueに使うべき正確な業種名の一覧を
+    プロンプトに追加する（表記ゆれのない条件生成のため）。
     """
+    sector_block = ""
+    if sectors:
+        sector_list = "、".join(sectors)
+        sector_block = (
+            "\n\nSECTORを使う場合、valueは次の業種名のいずれか一つを"
+            f"そのまま正確に使ってください（表記ゆれを吸収し、最も近いものを選ぶこと）: {sector_list}"
+        )
     transcript_lines = [
         f"{'ユーザー' if turn['role'] == 'user' else 'AI'}: {turn['content']}"
         for turn in history
     ]
     transcript = "\n".join(transcript_lines)
-    return f"{_PERSONA_INSTRUCTIONS}\n\n【これまでの会話】\n{transcript}\n\n【あなたの次の発言】"
+    return (
+        f"{_PERSONA_INSTRUCTIONS}{sector_block}"
+        f"\n\n【これまでの会話】\n{transcript}\n\n【あなたの次の発言】"
+    )
 
 
 def parse_dialogue_response(raw: str) -> dict:

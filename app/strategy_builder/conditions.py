@@ -17,6 +17,7 @@ _INDICATOR_COLUMNS: dict[str, str] = {
     "DIVIDEND_YIELD": "dividend_yield_pct",
     "REVENUE_GROWTH": "revenue_growth_pct",
     "MARKET_CAP": "market_cap",
+    "SECTOR": "sector",
 }
 
 # indicatorの日本語表示ラベル（判定理由の文字列生成に使う）。
@@ -27,6 +28,7 @@ _INDICATOR_LABELS: dict[str, str] = {
     "DIVIDEND_YIELD": "配当利回り",
     "REVENUE_GROWTH": "売上高伸び率",
     "MARKET_CAP": "時価総額",
+    "SECTOR": "業種",
 }
 
 # operator名 → (比較関数, 判定理由に使う日本語表現)。
@@ -93,5 +95,8 @@ def build_match_reason(row: pd.Series, conditions: list[dict]) -> str:
             continue
         _, op_label = op_entry
         label = _INDICATOR_LABELS.get(indicator, indicator)
-        parts.append(f"{label} {round(float(actual), 1)}（条件: {value}{op_label}）")
+        # SECTORのように数値でない指標（業種名など）はそのまま表示し、
+        # 数値指標のみ小数第1位に丸めて表示する。
+        actual_display = actual if isinstance(actual, str) else round(float(actual), 1)
+        parts.append(f"{label} {actual_display}（条件: {value}{op_label}）")
     return " / ".join(parts) if parts else "条件詳細なし"
