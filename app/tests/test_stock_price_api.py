@@ -294,6 +294,52 @@ def test_fetch_japanese_name_logs_request_and_response(monkeypatch, caplog):
     assert "シャープ" in caplog.text
 
 
+def test_fetch_universe_price_histories_uses_cache_on_second_call(tmp_path):
+    call_count = {"n": 0}
+    dates = pd.date_range("2026-01-01", periods=3, freq="D")
+
+    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+        call_count["n"] += 1
+        return pd.DataFrame({"Close": [10.0, 11.0, 12.0]}, index=dates)
+
+    tickers = ["AAA.T", "BBB.T"]
+    result1 = stock_price_api.fetch_universe_price_histories(
+        tickers, "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+    )
+    assert call_count["n"] == 2
+    assert result1["AAA.T"].tolist() == [10.0, 11.0, 12.0]
+
+    result2 = stock_price_api.fetch_universe_price_histories(
+        tickers, "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+    )
+    assert call_count["n"] == 2
+    assert result2["AAA.T"].tolist() == [10.0, 11.0, 12.0]
+
+
+def test_fetch_universe_price_histories_skips_failed_ticker(tmp_path):
+    dates = pd.date_range("2026-01-01", periods=2, freq="D")
+
+    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+        if ticker_symbol == "BAD.T":
+            raise ValueError("boom")
+        return pd.DataFrame({"Close": [1.0, 2.0]}, index=dates)
+
+    result = stock_price_api.fetch_universe_price_histories(
+        ["AAA.T", "BAD.T"], "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+    )
+    assert list(result.keys()) == ["AAA.T"]
+
+
+def test_fetch_universe_price_histories_skips_empty_history(tmp_path):
+    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+        return pd.DataFrame({"Close": []})
+
+    result = stock_price_api.fetch_universe_price_histories(
+        ["AAA.T"], "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+    )
+    assert result == {}
+
+
 def test_fetch_japanese_name_logs_warning_on_request_failure(monkeypatch, caplog):
     def raise_error(url, headers=None, timeout=None):
         raise stock_price_api.requests.RequestException("network error")

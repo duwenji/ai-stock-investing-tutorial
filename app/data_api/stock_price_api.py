@@ -157,3 +157,55 @@ def fetch_universe_fundamentals(
         df = pd.DataFrame(rows)
         write_cache(cache_dir, cache_key, df.to_json(orient="records", force_ascii=False))
     return df
+
+
+def fetch_universe_price_histories(
+    tickers: list[str],
+    period: str,
+    cache_dir: Path,
+    fetch_price_history=fetch_price_history,
+) -> dict[str, pd.Series]:
+    """複数銘柄の終値時系列をまとめて取得し、{ticker: pd.Series} として返す。
+
+    strategy_builderの簡易バックテスト・銘柄選定実行画面で、絞り込み後の
+    銘柄群の株価をまとめて取得する用途に使う。取得失敗・空データの銘柄は
+    結果から除外する。
+    """
+    cache_key = "universe-prices-" + hashlib.sha256(
+        f"{period}-{'-'.join(sorted(tickers))}".encode("utf-8")
+    ).hexdigest()[:12]
+    cached = read_cache(cache_dir, cache_key)
+    if cached is not None:
+        payload = json.loads(cached)
+        return {
+            ticker: pd.Series(
+                data["values"], index=pd.to_datetime(data["dates"]), name="Close"
+            )
+            for ticker, data in payload.items()
+        }
+
+    with log_duration(logger, f"ユニバース株価一括取得（{len(tickers)}銘柄, period={period}）"):
+        results = map_concurrently(
+            tickers, lambda ticker: fetch_price_history(ticker, period=period)
+        )
+        prices_by_ticker: dict[str, pd.Series] = {}
+        for ticker in tickers:
+            history = results[ticker]
+            if isinstance(history, Exception) or history is None or history.empty:
+                continue
+            prices_by_ticker[ticker] = history["Close"]
+
+        write_cache(
+            cache_dir,
+            cache_key,
+            json.dumps(
+                {
+                    ticker: {
+                        "dates": [d.isoformat() for d in series.index],
+                        "values": [float(v) for v in series],
+                    }
+                    for ticker, series in prices_by_ticker.items()
+                }
+            ),
+        )
+    return prices_by_ticker
