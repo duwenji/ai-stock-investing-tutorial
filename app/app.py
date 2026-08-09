@@ -16,6 +16,7 @@ from data_api.llm_client import check_claude_cli_available
 
 from app_tabs.backtest_tab import render_backtest_tab
 from app_tabs.portfolio_tab import render_portfolio_tab
+from app_tabs.qa_tab import render_qa_tab
 from app_tabs.ranking_tab import render_ranking_tab
 from app_tabs.screening_tab import render_screening_tab
 from app_tabs.sector import render_sector_tab
@@ -38,18 +39,25 @@ except Exception as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-# 6つの主要機能をタブとして構成する
-tab_portfolio, tab_screening, tab_backtest, tab_ranking, tab_sector, tab_strategy_builder = (
-    st.tabs(
-        [
-            "ポートフォリオ",
-            "スクリーニング",
-            "バックテスト",
-            "一括バックテスト",
-            "セクターローテーション",
-            "AI戦略ビルダー",
-        ]
-    )
+# 7つの主要機能をタブとして構成する
+(
+    tab_portfolio,
+    tab_screening,
+    tab_backtest,
+    tab_ranking,
+    tab_sector,
+    tab_strategy_builder,
+    tab_qa,
+) = st.tabs(
+    [
+        "ポートフォリオ",
+        "スクリーニング",
+        "バックテスト",
+        "一括バックテスト",
+        "セクターローテーション",
+        "AI戦略ビルダー",
+        "AI質問箱",
+    ]
 )
 
 with tab_portfolio:
@@ -69,3 +77,6 @@ with tab_sector:
 
 with tab_strategy_builder:
     render_strategy_builder_tab()
+
+with tab_qa:
+    render_qa_tab()
