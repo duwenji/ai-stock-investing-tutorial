@@ -17,7 +17,12 @@ def build_stock_detail_prompt(
         f"PER: {fundamentals.get('per')}\n"
         f"PBR: {fundamentals.get('pbr')}\n"
         f"配当利回り: {fundamentals.get('dividend_yield')}\n"
-        f"テクニカルシグナル: {technical.get('signal')}\n"
+        f"テクニカルシグナル（移動平均線）: {technical.get('signal')}\n"
+        f"RSI(14日、勢い): {technical.get('rsi')}（{technical.get('rsi_signal') or '不明'}）\n"
+        f"ADX(14日、トレンドの強さ): {technical.get('adx')}（{technical.get('adx_signal') or '不明'}）\n"
+        f"ATR(14日、値動きの大きさ、値幅%): {technical.get('atr_pct')}%"
+        f"（{technical.get('atr_signal') or '不明'}）\n"
+        f"OBV(出来高、値動きの裏付け): {technical.get('obv_signal') or '不明'}\n"
         f"直近ニュース見出し:\n{news_titles}\n"
     )
 

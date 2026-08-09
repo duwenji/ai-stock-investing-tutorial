@@ -37,7 +37,7 @@ Claude CodeなどMCP対応クライアントから、自然言語の質問に応
 | # | 教材 | 内容 |
 |---|------|------|
 | 01 | [ファンダメンタル分析エージェント](01-fundamental-analysis-agent.md) | PER/PBR等の実データに基づく割安/妥当/割高判定 |
-| 02 | [テクニカル分析エージェント](02-technical-analysis-agent.md) | 移動平均線・RSIの計算とLLMによる解釈 |
+| 02 | [テクニカル分析エージェント](02-technical-analysis-agent.md) | 移動平均線・RSI・ATR・ADX・OBVの体系的な計算とLLMによる解釈 |
 | 03 | [ニュースリサーチエージェント](03-news-research-agent.md) | 複数記事の個別センチメント分析と集計 |
 | 04 | [株式データMCPサーバー構築](04-mcp-server-for-stock-data.md) | MCPサーバーとしての株価/財務ツール公開 |
 

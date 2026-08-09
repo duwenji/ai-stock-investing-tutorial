@@ -79,6 +79,7 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     st.write(profile.get("profile_comment") or "―")
 
     price_history = detail["price_history"]
+    technical = detail["technical"]
     if price_history["dates"]:
         chart_df = pd.DataFrame(
             {
@@ -153,6 +154,44 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
             .properties(height=100)
         )
         st.altair_chart(volume_chart, width="stretch")
+
+        # RSI・ADX・ATR%は移動平均線と同様、計算バッファ込みの全期間の時系列を
+        # 保持しておき、表示直前に価格チャートと同じ直近6ヶ月へ絞り込むことで
+        # チャート開始時点から途切れなく、かつ価格チャートと日付軸を揃えて描画する。
+        indicator_df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(price_history["dates"]),
+                "rsi": technical.get("rsi_series"),
+                "adx": technical.get("adx_series"),
+                "atr_pct": technical.get("atr_pct_series"),
+            }
+        )
+        indicator_df = indicator_df[indicator_df["date"] >= display_start].reset_index(drop=True)
+
+        st.caption("RSI(14日) ― 破線は買われすぎ(70)／売られすぎ(30)の目安")
+        rsi_line = alt.Chart(indicator_df).mark_line(strokeWidth=1.5, color="#1f77b4").encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("rsi:Q", title="RSI", scale=alt.Scale(domain=[0, 100])),
+        )
+        rsi_thresholds = alt.Chart(pd.DataFrame({"y": [70, 30]})).mark_rule(
+            strokeDash=[4, 2], color="gray"
+        ).encode(y="y:Q")
+        st.altair_chart((rsi_line + rsi_thresholds).properties(height=120), width="stretch")
+
+        st.caption("ADX(14日) ― 破線は強いトレンドの目安(25)")
+        adx_line = alt.Chart(indicator_df).mark_line(strokeWidth=1.5, color="#9467bd").encode(
+            x=alt.X("date:T", title=None), y=alt.Y("adx:Q", title="ADX")
+        )
+        adx_threshold = alt.Chart(pd.DataFrame({"y": [25]})).mark_rule(
+            strokeDash=[4, 2], color="gray"
+        ).encode(y="y:Q")
+        st.altair_chart((adx_line + adx_threshold).properties(height=120), width="stretch")
+
+        st.caption("ATR(14日, 終値比%) ― 値動きの大きさ")
+        atr_chart = alt.Chart(indicator_df).mark_line(strokeWidth=1.5, color="#ff7f0e").encode(
+            x=alt.X("date:T", title=None), y=alt.Y("atr_pct:Q", title="ATR(%)")
+        )
+        st.altair_chart(atr_chart.properties(height=120), width="stretch")
     else:
         st.info("株価データを取得できませんでした。")
 
@@ -168,7 +207,26 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
         else "―",
     )
 
-    st.write(f"テクニカルシグナル: **{detail['technical'].get('signal')}**")
+    st.write(f"テクニカルシグナル（移動平均線）: **{technical.get('signal')}**")
+
+    # RSI・ADX・ATR・OBVを、それぞれ「勢い」「トレンド強さ」「値動きの大きさ」
+    # 「出来高の裏付け」を表すテクニカル指標としてメトリクス表示する（グラフは上部に表示済み）
+    rsi_col, adx_col, atr_col, obv_col = st.columns(4)
+    rsi = technical.get("rsi")
+    rsi_col.metric(
+        "RSI(14日)", f"{rsi}" if rsi is not None else "―", technical.get("rsi_signal") or "―"
+    )
+    adx = technical.get("adx")
+    adx_col.metric(
+        "ADX(14日)", f"{adx}" if adx is not None else "―", technical.get("adx_signal") or "―"
+    )
+    atr_pct = technical.get("atr_pct")
+    atr_col.metric(
+        "ATR(14日)",
+        f"{atr_pct}%" if atr_pct is not None else "―",
+        technical.get("atr_signal") or "―",
+    )
+    obv_col.metric("OBV(出来高)", technical.get("obv_signal") or "―")
 
     st.subheader("AI総合分析コメント")
     st.write(detail["comment"])

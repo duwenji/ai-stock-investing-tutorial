@@ -114,7 +114,9 @@ def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path):
         fetch_price_history=counting_fetch_price_history,
         fetch_news=lambda ticker: [],
         analyze_fundamentals=lambda ticker: {"per": 1, "pbr": 1, "dividend_yield": 1},
-        analyze_technical=lambda history: {"ma_short": 1, "ma_long": 1, "signal": "強気"},
+        analyze_technical=lambda history: {
+            "ma_short": 1, "ma_long": 1, "signal": "強気", "rsi_series": [1.0]
+        },
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
@@ -206,6 +208,47 @@ def test_generate_stock_detail_ignores_stale_cache_missing_profile(tmp_path):
 
     assert result["comment"] == "再生成後のコメント"
     assert "profile" in result
+
+
+def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(tmp_path):
+    stale_payload = {
+        "ticker": "AAA.T",
+        "name": "エーエー株式会社",
+        "price_history": {
+            "dates": ["2026-01-01T00:00:00", "2026-01-02T00:00:00", "2026-01-03T00:00:00"],
+            "open": [99.0, 100.5, 101.5],
+            "high": [101.0, 102.0, 103.0],
+            "low": [98.5, 100.0, 101.0],
+            "close": [100.0, 101.0, 102.0],
+            "volume": [1000, 1200, 900],
+        },
+        "fundamentals": {"per": 1, "pbr": 1, "dividend_yield": 1},
+        # RSI/ADX/ATRの時系列（rsi_series等）を追加する前の旧形式キャッシュ
+        "technical": {"ma_short": 1, "ma_long": 1, "signal": "強気"},
+        "news": [],
+        "comment": "指標時系列が無い旧形式のキャッシュ",
+        "profile": {"sector": "A", "industry": "B", "profile_comment": "C"},
+    }
+    write_cache(tmp_path, "stock-detail-AAA.T", json.dumps(stale_payload, ensure_ascii=False))
+
+    result = generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=lambda prompt: "再生成後のコメント",
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [],
+        analyze_fundamentals=lambda ticker: {"per": 1, "pbr": 1, "dividend_yield": 1},
+        analyze_technical=lambda history: {
+            "ma_short": 1, "ma_long": 1, "signal": "強気", "rsi_series": [1.0]
+        },
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+    )
+
+    assert result["comment"] == "再生成後のコメント"
+    assert "rsi_series" in result["technical"]
 
 
 def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog):

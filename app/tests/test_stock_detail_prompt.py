@@ -33,6 +33,30 @@ def test_build_stock_detail_prompt_instructs_no_directive_language():
     assert "断定的な売買判断" in prompt
 
 
+def test_build_stock_detail_prompt_includes_rsi_adx_atr_obv():
+    technical = {
+        "signal": "強気",
+        "rsi": 72.5,
+        "rsi_signal": "買われすぎ",
+        "adx": 31.2,
+        "adx_signal": "強いトレンド",
+        "atr_pct": 2.8,
+        "atr_signal": "中程度",
+        "obv_signal": "増加傾向",
+    }
+    prompt = build_stock_detail_prompt("AAA.T", "エーエー株式会社", {}, technical, [])
+    assert "RSI" in prompt
+    assert "72.5" in prompt
+    assert "買われすぎ" in prompt
+    assert "ADX" in prompt
+    assert "31.2" in prompt
+    assert "強いトレンド" in prompt
+    assert "ATR" in prompt
+    assert "2.8" in prompt
+    assert "OBV" in prompt
+    assert "増加傾向" in prompt
+
+
 def test_build_company_profile_prompt_includes_ticker_name_and_business_summary():
     prompt = build_company_profile_prompt(
         "AAA.T", "エーエー株式会社", "Technology", "Semiconductors", "Test business summary."

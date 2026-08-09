@@ -40,13 +40,17 @@ def generate_stock_detail(
     テスト時にモック差し替えしやすくしている。
     """
     # 生成にはLLM呼び出しを含みコストが高いため、キャッシュがあれば再利用する。
-    # 旧バージョンのキャッシュ（price_historyにopenキーが無い、またはprofile
-    # キーが無いもの）は無効として扱う。
+    # 旧バージョンのキャッシュ（price_historyにopenキーが無い、profileキーが
+    # 無い、またはtechnicalにRSI/ADX/ATRの時系列が無いもの）は無効として扱う。
     cache_key = f"stock-detail-{ticker}"
     cached = read_cache(cache_dir, cache_key)
     if cached is not None:
         payload = json.loads(cached)
-        if "open" in payload["price_history"] and "profile" in payload:
+        if (
+            "open" in payload["price_history"]
+            and "profile" in payload
+            and "rsi_series" in payload["technical"]
+        ):
             return payload
 
     with log_duration(logger, f"銘柄詳細生成（{ticker}）"):
