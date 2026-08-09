@@ -86,3 +86,31 @@ def parse_dialogue_response(raw: str) -> dict:
     ):
         return {"kind": "strategy", "strategy": parsed}
     return {"kind": "question", "text": raw.strip()}
+
+
+def build_refinement_prompt(pending_strategy: dict, feedback: str) -> str:
+    """確定候補の戦略JSONと評価フィードバックから、修正版JSONを1回で
+    生成させる軽量プロンプト（Evaluator-Optimizerパターンの改善ステップ）。
+    既存の対話ペルソナ指示（_PERSONA_INSTRUCTIONS）は使わない。
+    """
+    strategy_json = json.dumps(pending_strategy, ensure_ascii=False, indent=2)
+    return (
+        "以下は投資戦略のスクリーニング条件（JSON）と、その評価フィードバックです。\n\n"
+        f"【現在の条件】\n{strategy_json}\n\n"
+        f"【評価フィードバック】\n{feedback}\n\n"
+        "このフィードバックを踏まえて条件を修正し、それ以外の説明文を一切含めず、"
+        "必ず次のJSON形式のみを```json コードブロックで返してください。\n"
+        "```json\n"
+        "{\n"
+        '  "strategy_name": "修正後の戦略名",\n'
+        '  "conditions": [\n'
+        '    {"indicator": "PER", "operator": "LESS_THAN", "value": 15}\n'
+        "  ],\n"
+        '  "sort_by": "ROE",\n'
+        '  "order": "DESC"\n'
+        "}\n"
+        "```\n"
+        "indicatorはPER, PBR, ROE, DIVIDEND_YIELD, REVENUE_GROWTH, MARKET_CAP, SECTORの"
+        "いずれか、operatorはLESS_THAN, LESS_EQUAL, GREATER_THAN, GREATER_EQUAL, EQUALSの"
+        "いずれかを使ってください。"
+    )

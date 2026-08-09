@@ -1,4 +1,8 @@
-from prompt_patterns.strategy_dialogue import build_dialogue_prompt, parse_dialogue_response
+from prompt_patterns.strategy_dialogue import (
+    build_dialogue_prompt,
+    build_refinement_prompt,
+    parse_dialogue_response,
+)
 
 
 def test_build_dialogue_prompt_includes_persona_instructions():
@@ -63,3 +67,21 @@ def test_parse_dialogue_response_requires_conditions_key_for_strategy():
     raw = '{"strategy_name": "割安株"}'
     result = parse_dialogue_response(raw)
     assert result["kind"] == "question"
+
+
+def test_build_refinement_prompt_includes_strategy_and_feedback():
+    pending = {
+        "strategy_name": "割安株",
+        "conditions": [{"indicator": "PER", "operator": "LESS_THAN", "value": 15}],
+    }
+    prompt = build_refinement_prompt(pending, "条件が厳しすぎます")
+    assert "割安株" in prompt
+    assert "条件が厳しすぎます" in prompt
+    assert "json" in prompt
+
+
+def test_build_refinement_prompt_lists_allowed_indicators_and_operators():
+    pending = {"strategy_name": "割安株", "conditions": []}
+    prompt = build_refinement_prompt(pending, "改善してください")
+    assert "DIVIDEND_YIELD" in prompt
+    assert "GREATER_EQUAL" in prompt
