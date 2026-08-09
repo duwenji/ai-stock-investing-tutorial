@@ -33,6 +33,33 @@ def build_backtest_prompt(
     )
 
 
+def build_improvement_prompt(
+    ticker: str,
+    comparison: dict[str, dict],
+    explanation: str,
+    strategy_name: str = "移動平均クロスオーバー",
+) -> str:
+    # Step1（結果解説）の出力を入力として受け取り、追加で検討すべき観点を
+    # 生成させる2段階目のプロンプト（Prompt Chaining）。
+    comparison_json = json.dumps(comparison, ensure_ascii=False, indent=2, default=str)
+    return (
+        f"以下は{strategy_name}戦略のバックテスト結果（Python側で計算済み）と、"
+        "その結果について別のAIが作成した解説文です。\n\n"
+        f"【対象銘柄】{ticker}\n"
+        f"【パラメータ組ごとの結果（JSON）】\n{comparison_json}\n\n"
+        f"【既存の解説】\n{explanation}\n\n"
+        "この解説を踏まえ、投資家が追加で検討する価値がある観点を"
+        "日本語で2〜3個、簡潔に提案してください。\n"
+        "以下を必ず考慮してください。\n"
+        "1. パラメータ組同士の結果が大きく異なる場合、過学習を避けるために"
+        "確認すべき追加のデータ期間やパラメータ幅\n"
+        "2. 取引コストやスリッページなど、本バックテストが考慮していない要因\n\n"
+        "出力は教育的な提案にとどめ、「買うべき」「このルールで今すぐ売買すべき」"
+        "のような指示的な表現は使わないでください。\n\n"
+        f"{DISCLAIMER_NOTICE}"
+    )
+
+
 def build_ranking_comment_prompt(ranking_rows: list[dict]) -> str:
     # LLMに渡す情報を必要最小限（ティッカー・リターン・リスク調整後リターン）に絞り、
     # 余計な情報でコメントの精度が落ちたりトークンを浪費したりしないようにする。
