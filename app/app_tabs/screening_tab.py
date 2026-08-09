@@ -68,6 +68,8 @@ def render_screening_tab() -> None:
                     universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
                     result_df = apply_filters(universe_df, filters)
                     comments = generate_screening_comments(result_df, call_llm=call_llm)
+                    # 時価総額は円単位だと桁が大きく読みにくいため、表示用に億円単位へ変換する
+                    result_df = result_df.assign(market_cap=result_df["market_cap"] / 1e8)
 
                     st.session_state["screening_result_df"] = result_df
                     st.session_state["screening_comments"] = comments
@@ -92,7 +94,7 @@ def render_screening_tab() -> None:
                 "per": st.column_config.NumberColumn("PER"),
                 "pbr": st.column_config.NumberColumn("PBR"),
                 "dividend_yield_pct": st.column_config.NumberColumn("配当利回り(%)"),
-                "market_cap": st.column_config.NumberColumn("時価総額"),
+                "market_cap": st.column_config.NumberColumn("時価総額(億円)", format="%.0f"),
             },
             on_select="rerun",
             selection_mode="single-row",
