@@ -24,6 +24,7 @@ from strategy_builder.conditions import (
     build_match_reason,
     sort_by_strategy,
 )
+from strategy_builder.evaluation import run_evaluation_loop
 from strategy_builder.sector_insight import build_watchlist_from_rotation
 from strategy_builder.storage import load_strategies, save_strategy
 
@@ -172,7 +173,12 @@ def _render_dialogue_section() -> None:
             raw = call_llm(prompt)
         parsed = parse_dialogue_response(raw)
         if parsed["kind"] == "strategy":
-            st.session_state["strategy_pending_strategy"] = parsed["strategy"]
+            # 確定候補が生成された直後に自動評価・改善ループを1回だけ実行する
+            # （Evaluator-Optimizerパターン）。結果を人間の最終確認に回す。
+            with st.spinner("戦略条件を評価・改善中..."):
+                evaluation_result = run_evaluation_loop(parsed["strategy"], call_llm=call_llm)
+            st.session_state["strategy_pending_strategy"] = evaluation_result["strategy"]
+            st.session_state["strategy_pending_evaluation"] = evaluation_result
         else:
             history.append({"role": "assistant", "content": parsed["text"]})
             st.session_state["strategy_chat_history"] = history
@@ -180,6 +186,11 @@ def _render_dialogue_section() -> None:
 
     if pending is not None:
         st.subheader("確定候補の戦略")
+        evaluation_result = st.session_state.get("strategy_pending_evaluation")
+        if evaluation_result and evaluation_result["iterations"] > 0:
+            st.caption("AIによる自動改善を行いました。")
+            if evaluation_result["last_feedback"]:
+                st.caption(f"評価フィードバック: {evaluation_result['last_feedback']}")
         st.json(pending)
         confirm_col, continue_col = st.columns(2)
         with confirm_col:
@@ -187,6 +198,7 @@ def _render_dialogue_section() -> None:
                 save_strategy(STRATEGIES_PATH, pending)
                 st.session_state["strategy_confirmed"] = pending
                 st.session_state["strategy_pending_strategy"] = None
+                st.session_state["strategy_pending_evaluation"] = None
                 st.success(f"戦略「{pending['strategy_name']}」を保存しました。")
                 st.rerun()
         with continue_col:
@@ -202,6 +214,7 @@ def _render_dialogue_section() -> None:
                 )
                 st.session_state["strategy_chat_history"] = history
                 st.session_state["strategy_pending_strategy"] = None
+                st.session_state["strategy_pending_evaluation"] = None
                 st.rerun()
         return
 
@@ -391,6 +404,8 @@ def render_strategy_builder_tab() -> None:
         st.session_state["strategy_chat_history"] = []
     if "strategy_pending_strategy" not in st.session_state:
         st.session_state["strategy_pending_strategy"] = None
+    if "strategy_pending_evaluation" not in st.session_state:
+        st.session_state["strategy_pending_evaluation"] = None
     if "strategy_confirmed" not in st.session_state:
         st.session_state["strategy_confirmed"] = None
 
