@@ -25,6 +25,12 @@ LLMには条件の**翻訳**だけをさせ、実際の絞り込みはPython側�
 この考え方は、03-data-api/01-stock-price-api.mdで取得する
 実データとLLMの出力を組み合わせる際の基本パターンになります。
 
+> 関連: JSON構造化出力の契約設計の一般原則は
+> [genai-app-integration-tutorial: 構造化出力のJSON契約](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/02-io-contract-design/01-structured-output-json-contract.md)、
+> AIが解釈した条件を確定前にユーザーへ見せる設計（Verificationパターン）は
+> [genai-app-integration-tutorial: 確認ステップ](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/04-trust-and-safety-ux/01-verification-checkpoint.md)
+> で、それぞれ実アプリのソースコードとともに学べます。
+
 ## 主要概念・パラメータ解説
 
 | 要素 | 目的 | 具体例 |

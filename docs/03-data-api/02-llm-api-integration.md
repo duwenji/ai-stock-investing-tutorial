@@ -24,6 +24,11 @@
 次の03-structured-output.md、04-rate-limit-and-cost.md、さらに
 04-analysis-agentsの各エージェントでも共通して使われます。
 
+> 関連: API直叩き/SDK/CLIサブプロセスという呼び出し方式の選定基準を
+> 体系的に学びたい場合は
+> [genai-app-integration-tutorial: API/SDK/CLIサブプロセス方式の比較](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/01-invocation-and-architecture/02-api-sdk-vs-cli-subprocess.md)
+> を参照してください（`app/`の完成版アプリはCLIサブプロセス方式を採用しています）。
+
 ## 主要概念・パラメータ解説
 
 ### 2つのSDKの比較

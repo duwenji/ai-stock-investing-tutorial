@@ -19,6 +19,11 @@
 構造化出力の取得方法は [03-data-api/03-structured-output.md](../03-data-api/03-structured-output.md)
 を参照してください。
 
+> 関連: 複数銘柄分をまとめて1回のプロンプトで処理する「バッチ呼び出し」の
+> 設計判断は
+> [genai-app-integration-tutorial: 単発/バッチ呼び出しの設計](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/02-io-contract-design/02-single-vs-batch-prompting.md)
+> で一般原則として学べます。
+
 ## 主要概念・パラメータ解説
 
 ### エージェントの処理フロー

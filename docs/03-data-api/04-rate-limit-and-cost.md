@@ -27,6 +27,13 @@ LLM APIはトークン数と呼び出し回数に応じて課金されます。
 構築しますが、その前提としてここで学ぶコスト管理・レート制限
 対応が必要になります。
 
+> 関連: レート制限・タイムアウトへの対処とキャッシュ層の設計を、
+> ドメインに依存しない一般原則として学びたい場合は
+> [genai-app-integration-tutorial: レート制限・タイムアウト設計](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/03-reliability-and-cost/02-rate-limit-and-timeout.md)
+> と
+> [genai-app-integration-tutorial: キャッシュ層の設計](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/03-reliability-and-cost/03-caching-strategy.md)
+> を参照してください。
+
 ## 主要概念・パラメータ解説
 
 ### トークン数の目安

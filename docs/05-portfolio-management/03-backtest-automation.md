@@ -25,6 +25,12 @@
 次の04-lead-lag-correlation.mdでは、02で学んだ相関係数を
 時間差の視点に拡張します。
 
+> 関連: 発展版の実装例（`app/`）では、この「バックテスト結果解説」を
+> 「結果解説→改善提案」の2段階LLM呼び出し（Prompt Chaining）に
+> 発展させています。複数LLM呼び出しの組み合わせパターンは
+> [genai-app-integration-tutorial: Prompt Chaining](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/05-agentic-workflow-patterns/01-prompt-chaining.md)
+> で実ソースコードとともに学べます。
+
 ## 主要概念・パラメータ解説
 
 ### バックテスト結果の指標

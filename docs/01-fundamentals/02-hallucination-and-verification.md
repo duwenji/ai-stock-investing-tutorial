@@ -32,6 +32,11 @@
 カテゴリ02のプロンプト設計、カテゴリ03のAPI連携（RAG的な構成）で
 繰り返し使う基礎パターンです。
 
+> 関連: LLM応答が不正な形式で返ってきた場合に処理を止めず安全側の
+> 既定値へフォールバックする「防御的パース」の一般原則は
+> [genai-app-integration-tutorial: 防御的パースとフォールバック設計](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/03-reliability-and-cost/01-defensive-parsing-and-fallback.md)
+> で学べます。
+
 ## 主要概念・パラメータ解説
 
 | 手法 | 内容 | 効果 |

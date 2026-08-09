@@ -38,3 +38,7 @@
 - [docs/04-analysis-agents/00-README.md](docs/04-analysis-agents/00-README.md)
 - [docs/05-portfolio-management/00-README.md](docs/05-portfolio-management/00-README.md)
 - [docs/06-real-world-examples/00-README.md](docs/06-real-world-examples/00-README.md)
+
+## 関連教材
+
+- [genai-app-integration-tutorial](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/README.md) — 本教材で学ぶプロンプト設計・API連携・分析エージェントの先にある、生成AIをアプリケーションへ統合する際の一般的な設計パターン（呼び出し方式・入出力契約・信頼性/コスト・安全性UX・複数LLM呼び出しの組み合わせ）を体系的に学べる教材。本教材の完成版アプリ（`app/`）を随所でケーススタディとして参照しています。

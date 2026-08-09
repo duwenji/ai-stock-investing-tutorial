@@ -44,6 +44,14 @@
 で学んだ考え方をそのまま再利用し、「本日値上がりした業種の銘柄→過去の
 分析で追随が見込まれる業種の銘柄」を洗い出す入力補助として使います。
 
+> 関連: マルチターン（対話型）プロンプトの設計の一般原則は
+> [genai-app-integration-tutorial: マルチターン（対話型）プロンプトの設計](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/02-io-contract-design/04-multi-turn-dialogue-prompting.md)
+> で学べます。発展版の実装例（`app/`）では、対話が確定候補を生成した
+> 直後に「評価→不合格なら改善→再評価」のループ（Evaluator-Optimizer）を
+> 挟んでから、この教材で扱う確認ステップに渡しています。詳しくは
+> [genai-app-integration-tutorial: Evaluator-Optimizer](https://github.com/duwenji/genai-app-integration-tutorial/blob/master/docs/05-agentic-workflow-patterns/04-evaluator-optimizer.md)
+> を参照してください。
+
 ## 主要概念・パラメータ解説
 
 | 要素 | 目的 | 対応するコード |
