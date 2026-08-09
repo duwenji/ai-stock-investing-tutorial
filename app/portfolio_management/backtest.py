@@ -9,7 +9,7 @@ import pandas as pd
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm as default_call_llm
-from prompt_patterns.backtest_explanation import build_backtest_prompt
+from prompt_patterns.backtest_explanation import build_backtest_prompt, build_improvement_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -218,20 +218,43 @@ def generate_backtest_explanation(
     call_llm=default_call_llm,
 ) -> str:
     """バックテスト結果をLLMに渡し、投資家向けの解説レポート（Markdown）を
-    生成する。免責事項を先頭と末尾に必ず付与する。"""
+    生成する。免責事項を先頭と末尾に必ず付与する。
+
+    Prompt Chaining: Step1で結果解説を生成し、その出力をgate（空文字チェック）
+    で検証したうえで、Step2でStep1の解説を踏まえた改善提案を生成する。
+    Step1が空文字の場合はStep2に進まずエラーメッセージを返す。Step2が
+    空文字の場合は改善提案セクションを省略し、Step1の結果のみ返す。
+    """
     if presets is None:
         presets = STRATEGIES[strategy_name]["presets"]
 
     comparison = run_backtest_comparison(prices, backtest_func, presets, transaction_cost_pct)
-    prompt = build_backtest_prompt(ticker, comparison, strategy_name)
-    commentary = call_llm(prompt)
+
+    # Step1: 結果解説
+    explanation = call_llm(build_backtest_prompt(ticker, comparison, strategy_name)).strip()
+    if not explanation:
+        return "解説の生成に失敗しました。"
 
     sections = [
         DISCLAIMER_NOTICE,
         "",
         f"# バックテスト結果解説（{ticker}）",
         "",
-        commentary,
+        explanation,
+    ]
+
+    # Step2: 改善提案（Step1の解説を入力として渡す）
+    improvement_prompt = build_improvement_prompt(ticker, comparison, explanation, strategy_name)
+    improvement = call_llm(improvement_prompt).strip()
+    if improvement:
+        sections += [
+            "",
+            "## 追加で検討したい観点",
+            "",
+            improvement,
+        ]
+
+    sections += [
         "",
         "---",
         "",

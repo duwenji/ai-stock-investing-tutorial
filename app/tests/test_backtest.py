@@ -244,6 +244,89 @@ def test_generate_backtest_explanation_uses_default_ma_strategy_when_presets_omi
     assert "解説" in result
 
 
+def test_generate_backtest_explanation_calls_llm_twice_and_includes_improvement_section():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    responses = iter(["結果の解説です。", "追加提案です。"])
+    call_count = {"n": 0}
+
+    def fake_call_llm(prompt):
+        call_count["n"] += 1
+        return next(responses)
+
+    result = generate_backtest_explanation(
+        "AAA.T",
+        prices,
+        presets=[("A", {"short_window": 1, "long_window": 2})],
+        call_llm=fake_call_llm,
+    )
+
+    assert call_count["n"] == 2
+    assert "結果の解説です。" in result
+    assert "追加提案です。" in result
+    assert "## 追加で検討したい観点" in result
+
+
+def test_generate_backtest_explanation_second_prompt_includes_first_explanation():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    captured_prompts = []
+    responses = iter(["最初の解説文です。", "改善提案文です。"])
+
+    def fake_call_llm(prompt):
+        captured_prompts.append(prompt)
+        return next(responses)
+
+    generate_backtest_explanation(
+        "AAA.T",
+        prices,
+        presets=[("A", {"short_window": 1, "long_window": 2})],
+        call_llm=fake_call_llm,
+    )
+
+    assert "最初の解説文です。" in captured_prompts[1]
+    assert "AAA.T" in captured_prompts[1]
+
+
+def test_generate_backtest_explanation_gate_skips_second_call_when_explanation_empty():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    call_count = {"n": 0}
+
+    def fake_call_llm(prompt):
+        call_count["n"] += 1
+        return "   "
+
+    result = generate_backtest_explanation(
+        "AAA.T",
+        prices,
+        presets=[("A", {"short_window": 1, "long_window": 2})],
+        call_llm=fake_call_llm,
+    )
+
+    assert call_count["n"] == 1
+    assert result == "解説の生成に失敗しました。"
+
+
+def test_generate_backtest_explanation_omits_improvement_section_when_step2_empty():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+    responses = iter(["結果の解説です。", "  "])
+
+    def fake_call_llm(prompt):
+        return next(responses)
+
+    result = generate_backtest_explanation(
+        "AAA.T",
+        prices,
+        presets=[("A", {"short_window": 1, "long_window": 2})],
+        call_llm=fake_call_llm,
+    )
+
+    assert "結果の解説です。" in result
+    assert "## 追加で検討したい観点" not in result
+
+
 def test_run_universe_backtest_ranking_sorts_by_risk_adjusted_return_and_skips_short_history():
     dates3 = pd.date_range("2026-01-01", periods=3, freq="D")
     dates1 = pd.date_range("2026-01-01", periods=1, freq="D")
