@@ -1,4 +1,8 @@
-from prompt_patterns.stock_detail import build_company_profile_prompt, build_stock_detail_prompt
+from prompt_patterns.stock_detail import (
+    build_company_profile_prompt,
+    build_news_summary_translation_prompt,
+    build_stock_detail_prompt,
+)
 
 
 def test_build_stock_detail_prompt_includes_ticker_name_and_facts():
@@ -96,3 +100,12 @@ def test_build_company_profile_prompt_instructs_no_directive_language():
         "AAA.T", "エーエー株式会社", "Technology", "Semiconductors", "summary"
     )
     assert "断定的な投資判断" in prompt
+
+
+def test_build_news_summary_translation_prompt_includes_summaries_and_separator():
+    prompt = build_news_summary_translation_prompt(["Summary A", "Summary B"])
+    assert "Summary A" in prompt
+    assert "Summary B" in prompt
+    assert "@@@" in prompt
+    assert "日本語に翻訳してください" in prompt
+    assert "同じ順序・同じ件数" in prompt

@@ -58,3 +58,18 @@ def build_company_profile_prompt(
         f"詳細業種: {industry or '不明'}\n"
         f"事業内容: {business_summary}\n"
     )
+
+
+def build_news_summary_translation_prompt(summaries: list[str]) -> str:
+    # 画面表示専用の日本語訳を1回のLLM呼び出しでまとめて生成するためのプロンプト。
+    # 区切り文字@@@で入力と同じ順序・同じ件数の翻訳文を返すよう厳密に指示する
+    # （呼び出し元が応答を分割して各記事に割り当てるため、件数のズレは致命的）。
+    separator = "@@@"
+    joined = f"\n{separator}\n".join(summaries)
+    return (
+        "以下は英文のニュース要約です。各要約を日本語に翻訳してください。\n"
+        f"翻訳文の間は区切り文字「{separator}」だけの行を挟み、"
+        "入力と同じ順序・同じ件数で出力してください。"
+        "翻訳文以外の説明や前置きは出力しないでください。\n\n"
+        f"{joined}"
+    )
