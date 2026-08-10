@@ -49,6 +49,7 @@ class FakeTicker:
                     "title": "Headline 1",
                     "provider": {"displayName": "Pub"},
                     "clickThroughUrl": {"url": "https://example.com/1"},
+                    "summary": "Summary text 1",
                 }
             },
             {
@@ -56,6 +57,7 @@ class FakeTicker:
                     "title": "Headline 2",
                     "provider": {"displayName": "Pub2"},
                     "clickThroughUrl": {"url": "https://example.com/2"},
+                    "summary": "Summary text 2",
                 }
             },
         ]
@@ -296,7 +298,7 @@ def test_fetch_fundamentals_reuses_snapshot_on_second_call_same_day(monkeypatch,
     assert call_count["n"] == 1
 
 
-def test_fetch_news_returns_title_publisher_and_link(monkeypatch, tmp_path):
+def test_fetch_news_returns_title_publisher_link_and_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(engine)
@@ -304,7 +306,12 @@ def test_fetch_news_returns_title_publisher_and_link(monkeypatch, tmp_path):
 
     news = stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
     assert news == [
-        {"title": "Headline 1", "publisher": "Pub", "link": "https://example.com/1"}
+        {
+            "title": "Headline 1",
+            "publisher": "Pub",
+            "link": "https://example.com/1",
+            "summary": "Summary text 1",
+        }
     ]
 
 
@@ -315,7 +322,9 @@ def test_fetch_news_handles_missing_nested_fields(monkeypatch, tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     news = stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
-    assert news == [{"title": "Headline only", "publisher": None, "link": None}]
+    assert news == [
+        {"title": "Headline only", "publisher": None, "link": None, "summary": None}
+    ]
 
 
 def test_fetch_news_accumulates_across_calls_without_duplicates(monkeypatch, tmp_path):

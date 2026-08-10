@@ -307,6 +307,7 @@ def _fetch_news_from_yfinance(ticker_symbol: str, limit: int) -> list[dict]:
                 "title": content.get("title"),
                 "publisher": provider.get("displayName"),
                 "link": link_info.get("url"),
+                "summary": content.get("summary"),
             }
         )
     logger.info("newsレスポンス: ticker=%s data=%s", ticker_symbol, result)
@@ -349,6 +350,7 @@ def _insert_new_ticker_news(session, ticker_symbol: str, items: list[dict]) -> N
                 title=item.get("title"),
                 publisher=item.get("publisher"),
                 link=link,
+                summary=item.get("summary"),
             )
         )
 
@@ -370,7 +372,13 @@ def fetch_news(ticker_symbol: str, limit: int = 5, session_factory=SessionLocal)
             .all()
         )
         return [
-            {"title": row.title, "publisher": row.publisher, "link": row.link} for row in rows
+            {
+                "title": row.title,
+                "publisher": row.publisher,
+                "link": row.link,
+                "summary": row.summary,
+            }
+            for row in rows
         ]
 
 
