@@ -4,6 +4,7 @@
 
 import logging
 import statistics
+from concurrent.futures import ThreadPoolExecutor
 from itertools import product
 
 import pandas as pd
@@ -341,31 +342,51 @@ def generate_backtest_explanation(
 def run_universe_backtest_ranking(
     prices_by_ticker: dict[str, pd.Series],
     backtest_func,
-    preset_params: dict,
+    param_grid: dict,
+    fixed_params: dict | None = None,
     transaction_cost_pct: float = 0.0,
     min_days: int = 0,
+    max_workers: int = 8,
 ) -> list[dict]:
-    """銘柄ユニバース全体に同一戦略・同一パラメータでバックテストを行い、
-    リスク調整後リターン（収益率÷最大ドローダウン）でランキングする。"""
+    """銘柄ユニバース全体に対し、銘柄ごとに近傍グリッドサーチで最良パラメータを
+    探索し、そのリスク調整後リターン（収益率÷最大ドローダウン）でランキングする。
+    銘柄ごとの計算はCPUバウンドなベクトル化演算（pandas/numpy）のため、
+    スレッド並列でも一定の高速化が見込める。"""
+    fixed_params = fixed_params or {}
+    keys = list(param_grid.keys())
+    combos = list(product(*(list(param_grid[key]) for key in keys)))
+
+    def _rank_one(item: tuple[str, pd.Series]) -> dict | None:
+        ticker, prices = item
+        if len(prices) < min_days:
+            return None
+        try:
+            grid_results = _run_grid_combinations(
+                prices, backtest_func, keys, combos, fixed_params, transaction_cost_pct
+            )
+        except Exception:
+            logger.exception("銘柄 %s のグリッドサーチに失敗したためスキップします", ticker)
+            return None
+        summary = summarize_grid_stability(grid_results)
+        best = summary["best"]
+        return {
+            "ticker": ticker,
+            "total_return_pct": best["total_return_pct"],
+            "benchmark_return_pct": best["benchmark_return_pct"],
+            "win_rate_pct": best["win_rate_pct"],
+            "max_drawdown_pct": best["max_drawdown_pct"],
+            "trade_days": best["trade_days"],
+            "risk_adjusted_return": best["risk_adjusted_return"],
+            "best_params": best["params"],
+            "stability_cv": summary["cv"],
+            "is_stable": summary["is_stable"],
+        }
+
     with log_duration(logger, f"ユニバース一括バックテスト（{len(prices_by_ticker)}銘柄）"):
         rows = []
-        for ticker, prices in prices_by_ticker.items():
-            # データ期間が短すぎる銘柄は戦略が機能しないため除外する。
-            if len(prices) < min_days:
-                continue
-            result = backtest_func(
-                prices, transaction_cost_pct=transaction_cost_pct, **preset_params
-            )
-            drawdown = abs(result["max_drawdown_pct"])
-            # ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま指標とする。
-            risk_adjusted_return = (
-                result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
-            )
-            rows.append(
-                {
-                    "ticker": ticker,
-                    **result,
-                    "risk_adjusted_return": round(risk_adjusted_return, 2),
-                }
-            )
+        worker_count = min(max_workers, len(prices_by_ticker) or 1)
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for row in executor.map(_rank_one, prices_by_ticker.items()):
+                if row is not None:
+                    rows.append(row)
         return sorted(rows, key=lambda row: row["risk_adjusted_return"], reverse=True)

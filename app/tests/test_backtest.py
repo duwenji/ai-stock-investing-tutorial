@@ -391,12 +391,13 @@ def test_run_universe_backtest_ranking_sorts_by_risk_adjusted_return_and_skips_s
         }
 
     result = run_universe_backtest_ranking(
-        prices_by_ticker, fake_backtest_func, preset_params={}, min_days=2
+        prices_by_ticker, fake_backtest_func, param_grid={"x": [1]}, min_days=2
     )
 
     assert [row["ticker"] for row in result] == ["BBB.T", "AAA.T"]
     assert result[0]["risk_adjusted_return"] == 6.0
     assert result[1]["risk_adjusted_return"] == 2.0
+    assert result[0]["best_params"] == {"x": 1}
 
 
 def test_run_universe_backtest_ranking_falls_back_to_total_return_when_drawdown_is_zero():
@@ -413,10 +414,85 @@ def test_run_universe_backtest_ranking_falls_back_to_total_return_when_drawdown_
         }
 
     result = run_universe_backtest_ranking(
-        prices_by_ticker, fake_backtest_func, preset_params={}, min_days=1
+        prices_by_ticker, fake_backtest_func, param_grid={"x": [1]}, min_days=1
     )
 
     assert result[0]["risk_adjusted_return"] == 15.0
+
+
+def test_run_universe_backtest_ranking_picks_best_params_per_ticker_and_reports_stability():
+    dates = pd.date_range("2026-01-01", periods=2, freq="D")
+    prices_by_ticker = {"AAA.T": pd.Series([10.0, 10.0], index=dates)}
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        return {
+            "total_return_pct": float(params["x"]) * 10,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": -5.0,
+            "trade_days": 1,
+        }
+
+    result = run_universe_backtest_ranking(
+        prices_by_ticker, fake_backtest_func, param_grid={"x": [1, 2, 3]}, min_days=1
+    )
+
+    assert result[0]["best_params"] == {"x": 3}
+    assert result[0]["risk_adjusted_return"] == 6.0
+    assert "stability_cv" in result[0]
+    assert "is_stable" in result[0]
+
+
+def test_run_universe_backtest_ranking_applies_fixed_params():
+    dates = pd.date_range("2026-01-01", periods=2, freq="D")
+    prices_by_ticker = {"AAA.T": pd.Series([10.0, 10.0], index=dates)}
+    captured_kwargs = []
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        captured_kwargs.append(params)
+        return {
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 0,
+        }
+
+    run_universe_backtest_ranking(
+        prices_by_ticker,
+        fake_backtest_func,
+        param_grid={"x": [1]},
+        fixed_params={"y": 9},
+        min_days=1,
+    )
+
+    assert captured_kwargs == [{"x": 1, "y": 9}]
+
+
+def test_run_universe_backtest_ranking_skips_ticker_when_grid_search_raises(caplog):
+    dates = pd.date_range("2026-01-01", periods=2, freq="D")
+    prices_by_ticker = {
+        "AAA.T": pd.Series([10.0, 10.0], index=dates),
+        "BBB.T": pd.Series([20.0, 20.0], index=dates),
+    }
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        if float(prices.iloc[0]) == 10.0:
+            raise ValueError("計算失敗")
+        return {
+            "total_return_pct": 5.0,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": -1.0,
+            "trade_days": 1,
+        }
+
+    with caplog.at_level(logging.ERROR, logger="portfolio_management.backtest"):
+        result = run_universe_backtest_ranking(
+            prices_by_ticker, fake_backtest_func, param_grid={"x": [1]}, min_days=1
+        )
+
+    assert [row["ticker"] for row in result] == ["BBB.T"]
 
 
 def test_run_universe_backtest_ranking_logs_duration(caplog):
@@ -425,7 +501,9 @@ def test_run_universe_backtest_ranking_logs_duration(caplog):
 
     with caplog.at_level(logging.INFO, logger="portfolio_management.backtest"):
         run_universe_backtest_ranking(
-            prices_by_ticker, run_ma_crossover_backtest, {"short_window": 5, "long_window": 25}
+            prices_by_ticker,
+            run_ma_crossover_backtest,
+            param_grid={"short_window": [5], "long_window": [25]},
         )
 
     assert "ユニバース一括バックテスト" in caplog.text
