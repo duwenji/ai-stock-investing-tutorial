@@ -33,6 +33,14 @@ def get_user_id(username: str, session_factory=SessionLocal) -> int | None:
         return user.id if user else None
 
 
+def get_is_admin(username: str, session_factory=SessionLocal) -> bool:
+    """ユーザー名から管理者権限の有無を引き当てる。ユーザーが存在しなければ
+    Falseを返す。"""
+    with session_factory() as session:
+        user = session.query(User).filter_by(username=username).first()
+        return bool(user.is_admin) if user else False
+
+
 def persist_new_user(
     username: str,
     email: str | None,

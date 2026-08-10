@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from auth import build_credentials, get_user_id, persist_new_user, persist_password_update
+from auth import build_credentials, get_is_admin, get_user_id, persist_new_user, persist_password_update
 from db.engine import create_db_engine, init_db
 from db.models import User
 
@@ -87,3 +87,23 @@ def test_persist_password_update_updates_hash(session_factory):
     with session_factory() as session:
         stored = session.query(User).filter_by(username="taro").one()
         assert stored.hashed_password == "new-hash"
+
+
+def test_get_is_admin_returns_true_for_admin_user(session_factory):
+    with session_factory() as session:
+        session.add(User(username="admin", hashed_password="h", is_admin=True))
+        session.commit()
+
+    assert get_is_admin("admin", session_factory=session_factory) is True
+
+
+def test_get_is_admin_returns_false_for_non_admin_user(session_factory):
+    with session_factory() as session:
+        session.add(User(username="taro", hashed_password="h", is_admin=False))
+        session.commit()
+
+    assert get_is_admin("taro", session_factory=session_factory) is False
+
+
+def test_get_is_admin_returns_false_for_unknown_username(session_factory):
+    assert get_is_admin("nobody", session_factory=session_factory) is False
