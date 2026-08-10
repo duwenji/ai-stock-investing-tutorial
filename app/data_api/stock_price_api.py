@@ -75,7 +75,10 @@ def _fetch_price_history_from_yfinance(
 
 def _upsert_price_history(session, ticker_symbol: str, history: pd.DataFrame) -> None:
     """historyの各日付をPriceHistoryへ追記する。既にDBにある日付は上書きしない
-    （時系列を蓄積する方針のため）。"""
+    （時系列を蓄積する方針のため）。OHLCのいずれかがNaN（yfinance側のデータ
+    欠損。取引開始直後の未確定日等で実際に観測される）の日付は、SQLiteの
+    バインド時にNULLへ変換されNOT NULL制約に違反するため、その日付だけを
+    スキップする（他の正常な日付の挿入は妨げない）。"""
     if history.empty:
         return
     ensure_company_profile_stub(session, ticker_symbol)
@@ -86,6 +89,11 @@ def _upsert_price_history(session, ticker_symbol: str, history: pd.DataFrame) ->
     for index, row in history.iterrows():
         date_str = index.date().isoformat() if hasattr(index, "date") else str(index)
         if date_str in existing_dates:
+            continue
+        if row[["Open", "High", "Low", "Close"]].isna().any():
+            logger.warning(
+                "株価データ欠損のためスキップ: ticker=%s date=%s", ticker_symbol, date_str
+            )
             continue
         session.add(
             PriceHistory(

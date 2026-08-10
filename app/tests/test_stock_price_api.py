@@ -216,6 +216,36 @@ def test_upsert_price_history_skips_existing_dates(tmp_path):
         assert session.query(stock_price_api.PriceHistory).count() == 3
 
 
+def test_upsert_price_history_skips_rows_with_nan_ohlc(tmp_path):
+    """yfinanceが特定日付のOHLCをNaNで返すことがある（実際に本番で観測）。
+    NaNはSQLiteのバインド時にNULLへ変換され price_history のNOT NULL制約
+    に違反するため、該当日付だけを除外し他の正常な日付は挿入できることを
+    検証する。"""
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    dates = pd.date_range("2026-01-01", periods=3, freq="D")
+    history = pd.DataFrame(
+        {
+            "Open": [1.0, float("nan"), 3.0],
+            "High": [1.0, float("nan"), 3.0],
+            "Low": [1.0, float("nan"), 3.0],
+            "Close": [1.0, float("nan"), 3.0],
+            "Volume": [1.0, 2.0, 3.0],
+        },
+        index=dates,
+    )
+
+    with session_factory() as session:
+        stock_price_api._upsert_price_history(session, "7203.T", history)
+        session.commit()
+        rows = session.query(stock_price_api.PriceHistory).order_by(
+            stock_price_api.PriceHistory.date
+        ).all()
+        assert [r.date for r in rows] == ["2026-01-01", "2026-01-03"]
+
+
 def test_fetch_fundamentals_maps_info_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
