@@ -231,7 +231,7 @@ class FakeResponse:
             raise stock_price_api.requests.HTTPError(f"status {self.status_code}")
 
 
-def test_fetch_japanese_name_parses_yahoo_jp_title(monkeypatch):
+def test_fetch_japanese_name_parses_yahoo_jp_title(monkeypatch, tmp_path):
     def fake_get(url, headers=None, timeout=None):
         assert url == "https://finance.yahoo.co.jp/quote/6753.T"
         return FakeResponse(
@@ -239,10 +239,16 @@ def test_fetch_japanese_name_parses_yahoo_jp_title(monkeypatch):
         )
 
     monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
-    assert stock_price_api.fetch_japanese_name("6753.T") == "シャープ(株)"
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    assert stock_price_api.fetch_japanese_name(
+        "6753.T", session_factory=session_factory
+    ) == "シャープ(株)"
 
 
-def test_fetch_japanese_name_returns_none_when_title_missing_marker(monkeypatch):
+def test_fetch_japanese_name_returns_none_when_title_missing_marker(monkeypatch, tmp_path):
     monkeypatch.setattr(
         stock_price_api.requests,
         "get",
@@ -250,16 +256,66 @@ def test_fetch_japanese_name_returns_none_when_title_missing_marker(monkeypatch)
             "<title>ページが見つかりません - Yahoo!ファイナンス</title>"
         ),
     )
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     # マーカー「【」を含まないタイトルはティッカーページではないとみなし None を返す
-    assert stock_price_api.fetch_japanese_name("0000.T") is None
+    assert stock_price_api.fetch_japanese_name("0000.T", session_factory=session_factory) is None
 
 
-def test_fetch_japanese_name_returns_none_on_request_failure(monkeypatch):
+def test_fetch_japanese_name_returns_none_on_request_failure(monkeypatch, tmp_path):
     def raise_error(url, headers=None, timeout=None):
         raise stock_price_api.requests.RequestException("network error")
 
     monkeypatch.setattr(stock_price_api.requests, "get", raise_error)
-    assert stock_price_api.fetch_japanese_name("6753.T") is None
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    assert stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory) is None
+
+
+def test_fetch_japanese_name_reuses_db_within_freshness_window(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+
+    def fake_get(url, headers=None, timeout=None):
+        call_count["n"] += 1
+        return FakeResponse(
+            "<title>シャープ(株)【6753】：株価・株式情報（夜間PTS含む） - Yahoo!ファイナンス</title>"
+        )
+
+    monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+    stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+
+
+def test_company_profile_and_japanese_name_update_independently(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+
+    def fake_get(url, headers=None, timeout=None):
+        return FakeResponse(
+            "<title>シャープ(株)【6753】：株価・株式情報（夜間PTS含む） - Yahoo!ファイナンス</title>"
+        )
+
+    monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory)
+    stock_price_api.fetch_company_profile("6753.T", session_factory=session_factory)
+
+    with session_factory() as session:
+        row = session.get(stock_price_api.CompanyProfile, "6753.T")
+        assert row.name == "シャープ(株)"
+        assert row.sector == "Consumer Cyclical"
 
 
 def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
@@ -412,15 +468,19 @@ def test_fetch_news_logs_request_and_response(monkeypatch, caplog):
     assert "Headline 1" in caplog.text
 
 
-def test_fetch_japanese_name_logs_request_and_response(monkeypatch, caplog):
+def test_fetch_japanese_name_logs_request_and_response(monkeypatch, caplog, tmp_path):
     def fake_get(url, headers=None, timeout=None):
         return FakeResponse(
             "<title>シャープ(株)【6753】：株価・株式情報（夜間PTS含む） - Yahoo!ファイナンス</title>"
         )
 
     monkeypatch.setattr(stock_price_api.requests, "get", fake_get)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_japanese_name("6753.T")
+        stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory)
 
     assert "日本語銘柄名リクエスト: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
     assert "日本語銘柄名レスポンス: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
@@ -473,38 +533,93 @@ def test_fetch_universe_price_histories_skips_empty_history(tmp_path):
     assert result == {}
 
 
-def test_fetch_japanese_name_logs_warning_on_request_failure(monkeypatch, caplog):
+def test_fetch_japanese_name_logs_warning_on_request_failure(monkeypatch, caplog, tmp_path):
     def raise_error(url, headers=None, timeout=None):
         raise stock_price_api.requests.RequestException("network error")
 
     monkeypatch.setattr(stock_price_api.requests, "get", raise_error)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_japanese_name("6753.T")
+        stock_price_api.fetch_japanese_name("6753.T", session_factory=session_factory)
 
     assert "日本語銘柄名取得失敗: url=https://finance.yahoo.co.jp/quote/6753.T" in caplog.text
 
 
-def test_fetch_company_profile_maps_info_fields(monkeypatch):
+def test_fetch_company_profile_maps_info_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
-    result = stock_price_api.fetch_company_profile("7203.T")
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    result = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
     assert result["ticker"] == "7203.T"
     assert result["sector"] == "Consumer Cyclical"
     assert result["industry"] == "Auto Manufacturers"
     assert result["business_summary"] == "Test business summary text."
 
 
-def test_fetch_company_profile_missing_fields_return_none(monkeypatch):
+def test_fetch_company_profile_missing_fields_return_none(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", EmptyInfoTicker)
-    result = stock_price_api.fetch_company_profile("7203.T")
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    result = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
     assert result["sector"] is None
     assert result["industry"] is None
     assert result["business_summary"] is None
 
 
-def test_fetch_company_profile_logs_request_and_response(monkeypatch, caplog):
+def test_fetch_company_profile_reuses_db_within_freshness_window(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+
+    class CountingTicker(FakeTicker):
+        @property
+        def info(self):
+            call_count["n"] += 1
+            return super().info
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+    stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+
+
+def test_fetch_company_profile_refetches_when_stale(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    old_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=31)
+    with session_factory() as session:
+        session.add(
+            stock_price_api.CompanyProfile(
+                ticker="7203.T", sector="Old", industry="Old", profile_updated_at=old_time
+            )
+        )
+        session.commit()
+
+    result = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    assert result["sector"] == "Consumer Cyclical"
+
+
+def test_fetch_company_profile_logs_request_and_response(monkeypatch, caplog, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_company_profile("7203.T")
+        stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
 
     assert "company profileリクエスト: ticker=7203.T" in caplog.text
     assert "company profileレスポンス: ticker=7203.T" in caplog.text

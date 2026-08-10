@@ -17,7 +17,7 @@ from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
 from db.engine import SessionLocal
-from db.models import FundamentalsSnapshot, PriceHistory
+from db.models import CompanyProfile, FundamentalsSnapshot, PriceHistory
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +198,20 @@ def fetch_fundamentals(ticker_symbol: str, session_factory=SessionLocal) -> dict
         return result
 
 
-def fetch_company_profile(ticker_symbol: str) -> dict:
-    """指定銘柄の業種・事業内容をyfinance経由で取得する。"""
+_PROFILE_FRESHNESS_DAYS = 30
+
+
+def _is_stale(updated_at: datetime.datetime | None, max_age_days: int) -> bool:
+    if updated_at is None:
+        return True
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=datetime.timezone.utc)
+    return (now - updated_at).days >= max_age_days
+
+
+def _fetch_company_profile_from_yfinance(ticker_symbol: str) -> dict:
+    """yfinanceから直接業種・事業内容を取得する（DBを経由しない生の取得処理）。"""
     logger.info("company profileリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
@@ -211,6 +223,33 @@ def fetch_company_profile(ticker_symbol: str) -> dict:
     }
     logger.info("company profileレスポンス: ticker=%s data=%s", ticker_symbol, result)
     return result
+
+
+def fetch_company_profile(ticker_symbol: str, session_factory=SessionLocal) -> dict:
+    """指定銘柄の業種・事業内容を取得する。CompanyProfile.profile_updated_atが
+    _PROFILE_FRESHNESS_DAYS以内ならDBの値を再利用し、無ければ/古ければyfinanceから
+    取得してsector/industry/business_summary/profile_updated_atのみ更新する
+    （nameカラムはfetch_japanese_nameが管理するため触れない）。"""
+    with session_factory() as session:
+        row = session.get(CompanyProfile, ticker_symbol)
+        if row is not None and not _is_stale(row.profile_updated_at, _PROFILE_FRESHNESS_DAYS):
+            return {
+                "ticker": ticker_symbol,
+                "sector": row.sector,
+                "industry": row.industry,
+                "business_summary": row.business_summary,
+            }
+
+        result = _fetch_company_profile_from_yfinance(ticker_symbol)
+        if row is None:
+            row = CompanyProfile(ticker=ticker_symbol)
+            session.add(row)
+        row.sector = result["sector"]
+        row.industry = result["industry"]
+        row.business_summary = result["business_summary"]
+        row.profile_updated_at = datetime.datetime.now(datetime.timezone.utc)
+        session.commit()
+        return result
 
 
 def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
@@ -236,11 +275,10 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
     return result
 
 
-def fetch_japanese_name(ticker_symbol: str) -> str | None:
-    """Yahoo!ファイナンス（日本版）のページタイトルから日本語の銘柄名を取得する。
-
-    yfinance（Yahoo Financeのグローバルデータ）は日本株の名前を英語でしか
-    返さないため、日本語名専用にこの関数を使う。
+def _fetch_japanese_name_from_source(ticker_symbol: str) -> str | None:
+    """Yahoo!ファイナンス（日本版）のページタイトルから直接日本語銘柄名を取得する
+    （DBを経由しない生の取得処理）。yfinance（Yahoo Financeのグローバルデータ）は
+    日本株の名前を英語でしか返さないため、日本語名専用にこの関数を使う。
     """
     url = f"https://finance.yahoo.co.jp/quote/{ticker_symbol}"
     logger.info("日本語銘柄名リクエスト: url=%s", url)
@@ -262,6 +300,32 @@ def fetch_japanese_name(ticker_symbol: str) -> str | None:
 
     name = title.split("【", 1)[0].strip()
     return name or None
+
+
+def fetch_japanese_name(ticker_symbol: str, session_factory=SessionLocal) -> str | None:
+    """指定銘柄の日本語名を取得する。CompanyProfile.name_updated_atが
+    _PROFILE_FRESHNESS_DAYS以内ならDBの値を再利用する。取得に失敗した場合は
+    DBを更新せずNoneを返す（次回呼び出し時に再試行される）。"""
+    with session_factory() as session:
+        row = session.get(CompanyProfile, ticker_symbol)
+        if (
+            row is not None
+            and row.name is not None
+            and not _is_stale(row.name_updated_at, _PROFILE_FRESHNESS_DAYS)
+        ):
+            return row.name
+
+        name = _fetch_japanese_name_from_source(ticker_symbol)
+        if name is None:
+            return None
+
+        if row is None:
+            row = CompanyProfile(ticker=ticker_symbol)
+            session.add(row)
+        row.name = name
+        row.name_updated_at = datetime.datetime.now(datetime.timezone.utc)
+        session.commit()
+        return name
 
 
 def _to_pct(value: float | None) -> float | None:
