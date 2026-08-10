@@ -19,7 +19,7 @@ from app_tabs.sector.heatmap import render_heatmap
 from app_tabs.sector.network_diagram import render_network_diagram
 from app_tabs.sector.pairs_table import render_pairs_table
 from app_tabs.sector.wavelet_analysis import render_wavelet_analysis
-from app_tabs.shared import DEFAULT_USER_ID, run_or_load_sector_rotation
+from app_tabs.shared import get_current_user_id, run_or_load_sector_rotation
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def render_sector_tab() -> None:
         "将来の値動きを保証するものではありません。"
     )
 
-    display_settings = load_sector_display_settings(DEFAULT_USER_ID)
+    display_settings = load_sector_display_settings(get_current_user_id())
     section_labels = {
         "heatmap": "業種間相関ヒートマップ",
         "pairs_table": "リード・ラグ上位ペア",
@@ -103,7 +103,7 @@ def render_sector_tab() -> None:
             "height": new_height,
         }
         if new_display_settings != display_settings:
-            save_sector_display_settings(DEFAULT_USER_ID, new_display_settings)
+            save_sector_display_settings(get_current_user_id(), new_display_settings)
             display_settings = new_display_settings
 
     col_period, col_regen, col_run = st.columns(3)

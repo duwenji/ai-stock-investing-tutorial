@@ -21,10 +21,10 @@ from prompt_patterns.qa_routing import (
 )
 
 from app_tabs.shared import (
-    DEFAULT_USER_ID,
     cached_analyze_fundamentals,
     cached_fetch_news,
     cached_fetch_price_history,
+    get_current_user_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ _CATEGORY_LABELS = {
 
 def _build_portfolio_facts() -> tuple[dict, dict] | None:
     """保有銘柄一覧から構成比・リスク指標を計算する。保有銘柄が無ければNoneを返す。"""
-    holdings = load_holdings(DEFAULT_USER_ID)
+    holdings = load_holdings(get_current_user_id())
     if not holdings:
         return None
 

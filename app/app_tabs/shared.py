@@ -33,9 +33,11 @@ APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
 CACHE_DIR = DATA_DIR / "cache"
 
-# フェーズ3（認証導入）で認証済みユーザーのIDに置き換えるまでの暫定値。
-# scripts/migrate_to_db.pyが作成する最初のユーザーのIDと一致する。
-DEFAULT_USER_ID = 1
+def get_current_user_id() -> int:
+    """ログイン中のユーザーのIDを返す。app.pyがログイン成功時に
+    st.session_state["user_id"]を設定するため、このタブ描画コードに到達する時点では
+    必ず設定済み。"""
+    return st.session_state["user_id"]
 
 
 @st.cache_data(ttl=60)

@@ -29,7 +29,7 @@ from strategy_builder.sector_insight import build_watchlist_from_rotation
 from strategy_builder.storage import load_strategies, save_strategy
 
 from app_tabs.shared import (
-    DEFAULT_USER_ID,
+    get_current_user_id,
     handle_table_selection,
     render_mermaid,
     run_or_load_sector_rotation,
@@ -136,7 +136,7 @@ def _render_idea_input_section() -> None:
 def _render_dialogue_section() -> None:
     st.subheader("② AIとの対話でロジックを構築")
 
-    saved_strategies = load_strategies(DEFAULT_USER_ID)
+    saved_strategies = load_strategies(get_current_user_id())
     if saved_strategies:
         options = ["(新規に対話する)"] + [s["strategy_name"] for s in saved_strategies]
         picked = st.selectbox("保存済み戦略を開く", options, key="strategy_load_picker")
@@ -192,7 +192,7 @@ def _render_dialogue_section() -> None:
         confirm_col, continue_col = st.columns(2)
         with confirm_col:
             if st.button("この条件で確定する", key="strategy_confirm_pending"):
-                save_strategy(DEFAULT_USER_ID, pending)
+                save_strategy(get_current_user_id(), pending)
                 st.session_state["strategy_confirmed"] = pending
                 st.session_state["strategy_pending_strategy"] = None
                 st.session_state["strategy_pending_evaluation"] = None
