@@ -11,12 +11,13 @@ import logging
 import streamlit as st
 import streamlit_authenticator as stauth
 
-from auth import build_credentials, get_user_id, persist_new_user, persist_password_update
+from auth import build_credentials, get_is_admin, get_user_id, persist_new_user, persist_password_update
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import setup_logging
 from data_api.llm_client import check_claude_cli_available
 from db.engine import engine, init_db
 
+from app_tabs.admin_tab import render_admin_tab
 from app_tabs.backtest_tab import render_backtest_tab
 from app_tabs.portfolio_tab import render_portfolio_tab
 from app_tabs.qa_tab import render_qa_tab
@@ -94,6 +95,7 @@ if auth_status is not True:
     st.stop()
 
 st.session_state["user_id"] = get_user_id(st.session_state["username"])
+st.session_state["is_admin"] = get_is_admin(st.session_state["username"])
 
 authenticator.logout(location="sidebar")
 st.sidebar.caption(
@@ -113,7 +115,20 @@ except (stauth.CredentialsError, stauth.ResetError) as exc:
 
 st.sidebar.markdown(DISCLAIMER_NOTICE)
 
-# 7つの主要機能をタブとして構成する
+# 7つの主要機能に加え、管理者には8つ目の「管理者」タブを表示する
+tab_labels = [
+    "ポートフォリオ",
+    "スクリーニング",
+    "バックテスト",
+    "一括バックテスト",
+    "セクターローテーション",
+    "AI戦略ビルダー",
+    "AI質問箱",
+]
+if st.session_state["is_admin"]:
+    tab_labels.append("管理者")
+
+tabs = st.tabs(tab_labels)
 (
     tab_portfolio,
     tab_screening,
@@ -122,17 +137,7 @@ st.sidebar.markdown(DISCLAIMER_NOTICE)
     tab_sector,
     tab_strategy_builder,
     tab_qa,
-) = st.tabs(
-    [
-        "ポートフォリオ",
-        "スクリーニング",
-        "バックテスト",
-        "一括バックテスト",
-        "セクターローテーション",
-        "AI戦略ビルダー",
-        "AI質問箱",
-    ]
-)
+) = tabs[:7]
 
 with tab_portfolio:
     render_portfolio_tab()
@@ -154,3 +159,7 @@ with tab_strategy_builder:
 
 with tab_qa:
     render_qa_tab()
+
+if st.session_state["is_admin"]:
+    with tabs[7]:
+        render_admin_tab()
