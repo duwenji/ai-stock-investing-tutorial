@@ -64,6 +64,21 @@ def test_build_news_answer_prompt_handles_empty_news():
     assert "ニュースなし" in prompt
 
 
+def test_build_news_answer_prompt_includes_summary_when_present():
+    prompt = build_news_answer_prompt(
+        "最近のニュースは？",
+        [{"title": "好決算を発表", "publisher": "X", "summary": "Sales grew 20%."}],
+    )
+    assert "要約: Sales grew 20%." in prompt
+
+
+def test_build_news_answer_prompt_omits_summary_line_when_absent():
+    prompt = build_news_answer_prompt(
+        "最近のニュースは？", [{"title": "好決算を発表", "publisher": "X"}]
+    )
+    assert "要約:" not in prompt
+
+
 def test_build_portfolio_answer_prompt_includes_composition_and_risk():
     composition = {"holdings": [{"ticker": "AAA", "weight_pct": 40.0}], "total_value": 100000.0}
     risk = {"portfolio_volatility_pct": 18.5}

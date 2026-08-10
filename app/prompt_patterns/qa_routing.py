@@ -52,8 +52,19 @@ def build_technical_answer_prompt(question: str, technical: dict) -> str:
     )
 
 
+def _format_news_lines(news: list[dict]) -> str:
+    formatted = []
+    for item in news:
+        line = f"- {item['title']}"
+        summary = item.get("summary")
+        if summary:
+            line += f"\n  要約: {summary}"
+        formatted.append(line)
+    return "\n".join(formatted) or "- (ニュースなし)"
+
+
 def build_news_answer_prompt(question: str, news: list[dict]) -> str:
-    lines = "\n".join(f"- {item['title']}" for item in news) or "- (ニュースなし)"
+    lines = _format_news_lines(news)
     return (
         "以下は対象銘柄の直近ニュース見出しです"
         "（Python側で取得済みのため再取得は不要です）。\n\n"
