@@ -13,18 +13,18 @@
 
 ### 2.1 技術スタック
 
-| 項目               | 内容                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| UI                 | Streamlit（`st.tabs` による7タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）。`app.py` は起動処理とタブ生成のみを担い、各タブの描画は `app_tabs/` 配下のモジュールに分割 |
-| データ処理         | pandas / numpy                                                                                             |
-| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析・バックテストのグリッドサーチ結果ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`st.iframe`でパン・ズーム可能に埋め込み） |
-| 株価・ニュース取得 | yfinance                                                                                                   |
-| 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                      |
-| LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）            |
-| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列。`portfolio_management/backtest.py`の`run_universe_backtest_ranking`も銘柄ごとの近傍グリッドサーチを同様に最大8並列で実行するが、Streamlit非依存を保つため`map_concurrently`は経由せず直接`ThreadPoolExecutor`を使う）    |
-| ウェーブレット分析 | PyWavelets（`pywt.cwt`、複素モルレーウェーブレット`cmor1.5-1.0`によるクロスウェーブレット・コヒーレンス計算） |
-| パッケージ管理     | uv（Python 3.14系）                                                                                        |
-| テスト             | pytest（yfinance・`call_llm` はモック化）                                                                |
+| 項目               | 内容                                                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| UI                 | Streamlit（`st.tabs` による7タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）。`app.py` は起動処理とタブ生成のみを担い、各タブの描画は `app_tabs/` 配下のモジュールに分割                                                                                                                                            |
+| データ処理         | pandas / numpy                                                                                                                                                                                                                                                                                                                       |
+| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析・バックテストのグリッドサーチ結果ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`st.iframe`でパン・ズーム可能に埋め込み）              |
+| 株価・ニュース取得 | yfinance                                                                                                                                                                                                                                                                                                                             |
+| 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                                                                                                                                                                                                                                                |
+| LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）                                                                                                                                                                                                                                      |
+| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列。`portfolio_management/backtest.py`の`run_universe_backtest_ranking`も銘柄ごとの近傍グリッドサーチを同様に最大8並列で実行するが、Streamlit非依存を保つため`map_concurrently`は経由せず直接`ThreadPoolExecutor`を使う） |
+| ウェーブレット分析 | PyWavelets（`pywt.cwt`、複素モルレーウェーブレット`cmor1.5-1.0`によるクロスウェーブレット・コヒーレンス計算）                                                                                                                                                                                                                    |
+| パッケージ管理     | uv（Python 3.14系）                                                                                                                                                                                                                                                                                                                  |
+| テスト             | pytest（yfinance・`call_llm` はモック化）                                                                                                                                                                                                                                                                                          |
 
 ### 2.2 ディレクトリ構成
 
@@ -310,15 +310,15 @@ flowchart TB
 
 ## 3. 機能一覧
 
-| # | タブ                   | 概要                                                                                                                           |
-| - | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1 | ポートフォリオ         | 保有銘柄を登録し、構成比・損益・リスク・ファンダメンタル・テクニカル・ニュースセンチメントを統合したレビューレポートを生成する |
-| 2 | スクリーニング         | 自然言語の投資条件をAIがフィルタ条件（JSON、per/pbr/dividend_yield_pct/sectorに対応）に変換し、確認後にUNIVERSE 228銘柄から絞り込む |
-| 3 | バックテスト           | 指定銘柄に対し4戦略について近傍グリッドサーチ（15〜40通り）でベクトル化バックテストを実行し、ヒートマップと安定性チェック（変動係数）を表示したうえで、AIによる結果解説と改善提案の2段階（Prompt Chaining）を表示する |
-| 4 | 一括バックテスト       | UNIVERSE 228銘柄＋保有銘柄に対し、選択した戦略について銘柄ごとに近傍グリッドサーチで最良パラメータを探索して一括バックテストし、リスク調整済みリターン順にランキング表示する               |
+| # | タブ                   | 概要                                                                                                                                                                                                                                               |
+| - | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | ポートフォリオ         | 保有銘柄を登録し、構成比・損益・リスク・ファンダメンタル・テクニカル・ニュースセンチメントを統合したレビューレポートを生成する                                                                                                                     |
+| 2 | スクリーニング         | 自然言語の投資条件をAIがフィルタ条件（JSON、per/pbr/dividend_yield_pct/sectorに対応）に変換し、確認後にUNIVERSE 228銘柄から絞り込む                                                                                                                |
+| 3 | バックテスト           | 指定銘柄に対し4戦略について近傍グリッドサーチ（15〜40通り）でベクトル化バックテストを実行し、ヒートマップと安定性チェック（変動係数）を表示したうえで、AIによる結果解説と改善提案の2段階（Prompt Chaining）を表示する                              |
+| 4 | 一括バックテスト       | UNIVERSE 228銘柄＋保有銘柄に対し、選択した戦略について銘柄ごとに近傍グリッドサーチで最良パラメータを探索して一括バックテストし、リスク調整済みリターン順にランキング表示する                                                                       |
 | 5 | セクターローテーション | UNIVERSE銘柄を東証17業種に分類し、業種間の値動きの時差相関（リード・ラグ）・全ペアネットワーク図・ウェーブレット分析（時間変化するリード・ラグ）を過去の株価データから計算して表示する。表示するセクションのON/OFF・順序・高さはユーザーが設定可能 |
-| 6 | AI戦略ビルダー         | 投資アイデアをAIとの対話で構造化条件（JSON）に詰め、確定候補は自動評価・改善ループ（Evaluator-Optimizer）を経てから確認・保存し、簡易バックテストと最新データでの銘柄選定までを一気通貫で行う |
-| 7 | AI質問箱               | 自由記述の投資質問をAIが5カテゴリに分類し（Routing）、専用の分析エージェントへ振り分けて回答する |
+| 6 | AI戦略ビルダー         | 投資アイデアをAIとの対話で構造化条件（JSON）に詰め、確定候補は自動評価・改善ループ（Evaluator-Optimizer）を経てから確認・保存し、簡易バックテストと最新データでの銘柄選定までを一気通貫で行う                                                      |
+| 7 | AI質問箱               | 自由記述の投資質問をAIが5カテゴリに分類し（Routing）、専用の分析エージェントへ振り分けて回答する                                                                                                                                                   |
 
 上記5タブ（スクリーニング／一括バックテスト／セクターローテーションの結果テーブル、ポートフォリオの保有銘柄一覧、AI戦略ビルダーの銘柄選定結果テーブル）からは行クリックまたはボタンで**銘柄詳細ダイアログ**（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)参照）を開ける。特定のタブに属さないクロスカッティングな機能のため、上表には独立行を設けていない。
 
@@ -677,13 +677,13 @@ sequenceDiagram
 
 #### 各セクションの内容
 
-| セクション | 内容 | 実装モジュール |
-| --- | --- | --- |
-| 業種間相関ヒートマップ | `pairs` の全ペアから対称な相関行列（`\|correlation\|`）を構築し、Altairの `mark_rect` で描画する。 | `app_tabs/sector/heatmap.py`（`render_heatmap`） |
-| リード・ラグ上位ペア | `leading_sector`/`lagging_sector`/`lag_days`/`correlation` の表と、リード・ラグの読み方を説明する `st.expander`。 | `app_tabs/sector/pairs_table.py`（`render_pairs_table`） |
-| 相関上位5ペアのAIコメント | `payload["comments"]` を `"<先行業種>-><追随業種>"` キーで参照して表示する。 | `app_tabs/sector/ai_comments.py`（`render_ai_comments`） |
-| 業種間ネットワーク（全ペア俯瞰） | 後述（ネットワーク図）。 | `app_tabs/sector/network_diagram.py`（`render_network_diagram`） |
-| ウェーブレット分析 | 後述（ウェーブレット分析）。 | `app_tabs/sector/wavelet_analysis.py`（`render_wavelet_analysis`） |
+| セクション                       | 内容                                                                                                                        | 実装モジュール                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 業種間相関ヒートマップ           | `pairs` の全ペアから対称な相関行列（`\|correlation\|`）を構築し、Altairの `mark_rect` で描画する。                      | `app_tabs/sector/heatmap.py`（`render_heatmap`）                   |
+| リード・ラグ上位ペア             | `leading_sector`/`lagging_sector`/`lag_days`/`correlation` の表と、リード・ラグの読み方を説明する `st.expander`。 | `app_tabs/sector/pairs_table.py`（`render_pairs_table`）           |
+| 相関上位5ペアのAIコメント        | `payload["comments"]` を `"<先行業種>-><追随業種>"` キーで参照して表示する。                                            | `app_tabs/sector/ai_comments.py`（`render_ai_comments`）           |
+| 業種間ネットワーク（全ペア俯瞰） | 後述（ネットワーク図）。                                                                                                    | `app_tabs/sector/network_diagram.py`（`render_network_diagram`）   |
+| ウェーブレット分析               | 後述（ウェーブレット分析）。                                                                                                | `app_tabs/sector/wavelet_analysis.py`（`render_wavelet_analysis`） |
 
 有効な業種ペアが1件もない場合は「有効な業種ペアがありませんでした」と表示する。スキップ銘柄一覧・除外業種一覧・免責事項はセクションの表示設定に関わらず常に末尾に表示する。本タブの結果テーブル（ヒートマップ・ペア表）からは、他タブと異なり**銘柄詳細ダイアログへの導線はない**（対象が「業種」であり個別銘柄ではないため）。
 
@@ -936,8 +936,8 @@ sequenceDiagram
 
 `app_tabs/shared.py` で以下の薄いラッパー関数として定義され、Streamlitのセッション内で同一引数の呼び出し結果をメモリ上に保持する。ブラウザタブを開いている間、同一銘柄への重複した外部呼び出し（yfinance・スクレイピング）を抑制する目的で、ポートフォリオ・バックテスト・一括バックテスト・セクターローテーションの各タブモジュールから共通してインポートされる。
 
-| 関数                             | ラップ対象               | TTL    |
-| -------------------------------- | ------------------------ | ------ |
+| 関数                            | ラップ対象               | TTL    |
+| ------------------------------- | ------------------------ | ------ |
 | `cached_fetch_japanese_name`  | `fetch_japanese_name`  | 24時間 |
 | `cached_fetch_price_history`  | `fetch_price_history`  | 30分   |
 | `cached_analyze_fundamentals` | `analyze_fundamentals` | 30分   |
@@ -967,18 +967,18 @@ data/
 
 #### データ一覧
 
-| データ                         | 保存先                                                 | キー・形式                                                                                                                                                 | 生成元                                               |
-| ------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 保有銘柄                       | `data/holdings.json`                                 | `[{"ticker": str, "shares": int, "cost": float}, ...]`                                                                                                   | ポートフォリオタブの「保存」ボタン（`storage.py`） |
-| セクターローテーション表示設定 | `data/sector_display_settings.json`                  | JSON文字列`{"visible": {...}, "order": {...}, "height": {...}}`（セクションキーごとのbool/int/int）                                                     | セクターローテーションタブ「表示設定」expander（`sector_analysis/display_settings.py`） |
-| 保存済み戦略                   | `data/strategies.json`                                | `[{"strategy_name", "conditions", "sort_by", "order"}, ...]`。同名戦略は上書き                                                                             | AI戦略ビルダータブ「この条件で確定する」（`strategy_builder/storage.py`） |
-| ポートフォリオレビュー結果     | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁                       | ポートフォリオタブ「レビューを生成」                 |
-| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                                         | スクリーニングタブ（絞り込み実行時）                 |
-| 単一銘柄バックテスト解説       | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文＋改善提案（プレーンテキスト、Prompt Chaining Step1・Step2を結合した1つの文字列）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁             | バックテストタブ「バックテストを実行」               |
-| 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments"}`。`ranking_rows`の各行は銘柄ごとに探索された`best_params`・`stability_cv`・`is_stable`を含む。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                      | 一括バックテストタブ「一括バックテストを実行」       |
-| セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt`   | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments", "sector_returns", "network_pairs"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁。`sector_returns`は業種別日次リターン系列（ウェーブレット分析の再計算元）、`network_pairs`は全ペア×周期帯の支配的ラグ集約（ネットワーク図の描画元） | セクターローテーションタブ「分析を実行」             |
-| ウェーブレット分析AI解説       | `data/cache/YYYY-MM-DD-wavelet-comment-<hash>.txt`   | 解説文（プレーンテキスト）。キーは業種A・業種B・取得期間・周期帯のSHA256先頭12桁                                                                           | ウェーブレット分析セクション「AI解説を生成」         |
-| 銘柄詳細情報                   | `data/cache/YYYY-MM-DD-stock-detail-<ticker>.txt`    | JSON文字列`{"ticker", "name", "price_history"(OHLCV), "fundamentals", "technical", "news", "comment"}`。キーはハッシュ化せず**ティッカーそのまま** | 銘柄詳細ダイアログ（`stock_detail/detail.py`）     |
+| データ                         | 保存先                                                 | キー・形式                                                                                                                                                                                                                                                                                                       | 生成元                                                                                    |
+| ------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 保有銘柄                       | `data/holdings.json`                                 | `[{"ticker": str, "shares": int, "cost": float}, ...]`                                                                                                                                                                                                                                                         | ポートフォリオタブの「保存」ボタン（`storage.py`）                                      |
+| セクターローテーション表示設定 | `data/sector_display_settings.json`                  | JSON文字列`{"visible": {...}, "order": {...}, "height": {...}}`（セクションキーごとのbool/int/int）                                                                                                                                                                                                            | セクターローテーションタブ「表示設定」expander（`sector_analysis/display_settings.py`） |
+| 保存済み戦略                   | `data/strategies.json`                               | `[{"strategy_name", "conditions", "sort_by", "order"}, ...]`。同名戦略は上書き                                                                                                                                                                                                                                 | AI戦略ビルダータブ「この条件で確定する」（`strategy_builder/storage.py`）               |
+| ポートフォリオレビュー結果     | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁                                                                                                                                                                             | ポートフォリオタブ「レビューを生成」                                                      |
+| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                                                                                                                                                                                               | スクリーニングタブ（絞り込み実行時）                                                      |
+| 単一銘柄バックテスト解説       | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文＋改善提案（プレーンテキスト、Prompt Chaining Step1・Step2を結合した1つの文字列）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁                                                                                                                                                                    | バックテストタブ「バックテストを実行」                                                    |
+| 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments"}`。`ranking_rows`の各行は銘柄ごとに探索された`best_params`・`stability_cv`・`is_stable`を含む。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                                                                                        | 一括バックテストタブ「一括バックテストを実行」                                            |
+| セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt`   | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments", "sector_returns", "network_pairs"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁。`sector_returns`は業種別日次リターン系列（ウェーブレット分析の再計算元）、`network_pairs`は全ペア×周期帯の支配的ラグ集約（ネットワーク図の描画元） | セクターローテーションタブ「分析を実行」                                                  |
+| ウェーブレット分析AI解説       | `data/cache/YYYY-MM-DD-wavelet-comment-<hash>.txt`   | 解説文（プレーンテキスト）。キーは業種A・業種B・取得期間・周期帯のSHA256先頭12桁                                                                                                                                                                                                                                 | ウェーブレット分析セクション「AI解説を生成」                                              |
+| 銘柄詳細情報                   | `data/cache/YYYY-MM-DD-stock-detail-<ticker>.txt`    | JSON文字列`{"ticker", "name", "price_history"(OHLCV), "fundamentals", "technical", "news", "comment"}`。キーはハッシュ化せず**ティッカーそのまま**                                                                                                                                                       | 銘柄詳細ダイアログ（`stock_detail/detail.py`）                                          |
 
 #### 保管方式のポイント（`common/cache.py`）
 
@@ -999,30 +999,30 @@ data/
 
 ### 5.5 エラーハンドリング一覧
 
-| 事象                                                   | 挙動                                                                                                         |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Claude Code CLI未検出                                  | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）                                 |
-| LLMサブプロセスの非0終了                               | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                          |
-| LLM応答のJSONパース失敗（スクリーニング条件）          | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない                                                 |
-| LLM応答のJSONパース失敗（各種コメント・センチメント）  | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続                                       |
-| `holdings.json` 破損・読み込み失敗                   | 空リストにフォールバック                                                                                     |
-| 個別銘柄の株価データ取得失敗（ポートフォリオ）         | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続 |
-| 個別銘柄のfundamentals取得失敗（スクリーニング）       | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続                                     |
-| 個別銘柄の株価データ取得失敗（一括バックテスト）       | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                                                   |
-| 個別銘柄のグリッドサーチ計算失敗（一括バックテスト）   | `logger.exception` でログに記録し、その銘柄をランキング結果から除外して処理継続（`run_universe_backtest_ranking`） |
-| 個別銘柄の株価データ取得失敗（セクターローテーション） | `skipped_tickers` に記録、構成銘柄が全滅した業種は `excluded_sectors` に記録、全滅時のみエラー表示       |
-| ペア単位のウェーブレット集約失敗（ネットワーク図データ計算） | `compute_all_pairs_dominant_lag` 内で該当ペア・周期帯を結果からスキップし処理継続                        |
-| ネットワーク図でコヒーレンス閾値を満たすペアが0件      | `build_mermaid_lead_lag_graph` が`None`を返し、「十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。」と表示 |
-| ウェーブレット分析で2業種の共通データが不足/計算例外   | 空のDataFrame（または例外をUI側でcatch）を経て「選択した2業種の共通データが不足しているため、分析できませんでした。」と表示 |
-| 銘柄詳細ダイアログで株価データが空                     | `st.info("株価データを取得できませんでした。")` のみでチャート省略、他情報は表示継続                       |
-| バックテスト対象の日数不足                             | エラー表示のみで実行しない                                                                                   |
-| バックテスト解説Step1（結果解説）が空文字             | Step2（改善提案）に進まず「解説の生成に失敗しました。」を返す                                                |
-| バックテスト解説Step2（改善提案）が空文字             | 改善提案セクションのみ省略し、Step1の結果解説は表示する                                                      |
-| AI質問箱の分類ラベルが未知/空、または個別銘柄カテゴリで銘柄コード未入力 | `general`にフォールバックし、後者は案内文を表示                                                |
-| AI質問箱でポートフォリオ質問時に保有銘柄が0件           | LLMを呼ばず「保有銘柄が未登録です。」と表示                                                                  |
-| AI戦略ビルダーの評価（`evaluate_strategy`）がJSONパース失敗、または`pass`キー欠落 | 不合格として扱い改善ループを継続（安全側フォールバック）                                    |
-| AI戦略ビルダーの改善案（`build_refinement_prompt`応答）が無効なJSON、または`conditions`キー欠落 | そのイテレーションをスキップし直前の戦略のままループ継続                                    |
-| 旧形式キャッシュ（フォーマット非互換）                 | JSONDecodeError、（銘柄詳細情報の場合）`"open"`キー欠落、または（セクターローテーションの場合）`sector_returns`/`network_pairs`キー欠落として扱い再生成 |
+| 事象                                                                                                | 挙動                                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code CLI未検出                                                                               | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）                                                                                  |
+| LLMサブプロセスの非0終了                                                                            | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                                                                           |
+| LLM応答のJSONパース失敗（スクリーニング条件）                                                       | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない                                                                                                  |
+| LLM応答のJSONパース失敗（各種コメント・センチメント）                                               | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続                                                                                        |
+| `holdings.json` 破損・読み込み失敗                                                                | 空リストにフォールバック                                                                                                                                      |
+| 個別銘柄の株価データ取得失敗（ポートフォリオ）                                                      | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続                                                  |
+| 個別銘柄のfundamentals取得失敗（スクリーニング）                                                    | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続                                                                                      |
+| 個別銘柄の株価データ取得失敗（一括バックテスト）                                                    | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                                                                                                    |
+| 個別銘柄のグリッドサーチ計算失敗（一括バックテスト）                                                | `logger.exception` でログに記録し、その銘柄をランキング結果から除外して処理継続（`run_universe_backtest_ranking`）                                        |
+| 個別銘柄の株価データ取得失敗（セクターローテーション）                                              | `skipped_tickers` に記録、構成銘柄が全滅した業種は `excluded_sectors` に記録、全滅時のみエラー表示                                                        |
+| ペア単位のウェーブレット集約失敗（ネットワーク図データ計算）                                        | `compute_all_pairs_dominant_lag` 内で該当ペア・周期帯を結果からスキップし処理継続                                                                           |
+| ネットワーク図でコヒーレンス閾値を満たすペアが0件                                                   | `build_mermaid_lead_lag_graph` が`None`を返し、「十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。」と表示                         |
+| ウェーブレット分析で2業種の共通データが不足/計算例外                                                | 空のDataFrame（または例外をUI側でcatch）を経て「選択した2業種の共通データが不足しているため、分析できませんでした。」と表示                                   |
+| 銘柄詳細ダイアログで株価データが空                                                                  | `st.info("株価データを取得できませんでした。")` のみでチャート省略、他情報は表示継続                                                                        |
+| バックテスト対象の日数不足                                                                          | エラー表示のみで実行しない                                                                                                                                    |
+| バックテスト解説Step1（結果解説）が空文字                                                           | Step2（改善提案）に進まず「解説の生成に失敗しました。」を返す                                                                                                 |
+| バックテスト解説Step2（改善提案）が空文字                                                           | 改善提案セクションのみ省略し、Step1の結果解説は表示する                                                                                                       |
+| AI質問箱の分類ラベルが未知/空、または個別銘柄カテゴリで銘柄コード未入力                             | `general`にフォールバックし、後者は案内文を表示                                                                                                             |
+| AI質問箱でポートフォリオ質問時に保有銘柄が0件                                                       | LLMを呼ばず「保有銘柄が未登録です。」と表示                                                                                                                   |
+| AI戦略ビルダーの評価（`evaluate_strategy`）がJSONパース失敗、または`pass`キー欠落               | 不合格として扱い改善ループを継続（安全側フォールバック）                                                                                                      |
+| AI戦略ビルダーの改善案（`build_refinement_prompt`応答）が無効なJSON、または`conditions`キー欠落 | そのイテレーションをスキップし直前の戦略のままループ継続                                                                                                      |
+| 旧形式キャッシュ（フォーマット非互換）                                                              | JSONDecodeError、（銘柄詳細情報の場合）`"open"`キー欠落、または（セクターローテーションの場合）`sector_returns`/`network_pairs`キー欠落として扱い再生成 |
 
 ### 5.6 テスト方針
 
@@ -1036,3 +1036,4 @@ data/
 - レポートのメール/Slack自動送信
 - 複数ユーザー対応・認証
 - UNIVERSE（日経225構成銘柄、現在228銘柄）の定期的な見直し・入れ替え反映（`screening/universe.py` に実装時点＝2026年7月時点のスナップショットである旨のコメントあり。日経225の定期見直し・臨時入れ替えに追従する仕組みは未実装で、公式発表との定期照合が手作業前提。銘柄追加時は `screening/sectors.py::SECTOR_MAP` の追随更新も手作業）
+- データベース対応（現状は `common/cache.py` による日付キー付きファイルキャッシュと `strategies.json` などのフラットファイルでの永続化のみで、RDBMS/NoSQLは未導入。データ量増加や複数プロセスからの同時アクセス、履歴の構造化クエリが必要になった場合はSQLite等への移行を検討）
