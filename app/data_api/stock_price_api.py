@@ -50,11 +50,21 @@ def ensure_company_profile_stub(session, ticker_symbol: str) -> None:
         session.add(CompanyProfile(ticker=ticker_symbol))
 
 
-def _fetch_price_history_from_yfinance(ticker_symbol: str, period: str) -> pd.DataFrame:
-    """yfinanceから直接株価時系列を取得する（DBを経由しない生の取得処理）。"""
-    logger.info("株価履歴リクエスト: ticker=%s period=%s", ticker_symbol, period)
+def _fetch_price_history_from_yfinance(
+    ticker_symbol: str, period: str | None = None, start_date: datetime.date | None = None
+) -> pd.DataFrame:
+    """yfinanceから直接株価時系列を取得する（DBを経由しない生の取得処理）。
+    start_date指定時はその日付以降のみを取得する差分取得、未指定時は
+    period分をまとめて取得する全量取得になる。"""
     ticker = yf.Ticker(ticker_symbol)
-    history = ticker.history(period=period)
+    if start_date is not None:
+        logger.info(
+            "株価履歴リクエスト（差分）: ticker=%s start_date=%s", ticker_symbol, start_date
+        )
+        history = ticker.history(start=start_date.isoformat())
+    else:
+        logger.info("株価履歴リクエスト: ticker=%s period=%s", ticker_symbol, period)
+        history = ticker.history(period=period)
     logger.info(
         "株価履歴レスポンス: ticker=%s data=%s",
         ticker_symbol,
@@ -117,9 +127,11 @@ def fetch_price_history(
     ticker_symbol: str, period: str = "1mo", session_factory=SessionLocal
 ) -> pd.DataFrame:
     """指定銘柄の株価時系列（OHLCV）を取得する。DB上の当該銘柄の最新日付が
-    「本日から1日以内」ならDBから期間分を組み立てて返す。それより古い/データ無し
-    ならyfinanceから_MAX_FETCH_PERIOD分を取得してPriceHistoryへ追記した上で、
-    DBから期間分を組み立てて返す。"""
+    「本日から1日以内」ならDBから期間分を組み立てて返す。それより古い場合、
+    既存データが無ければ_MAX_FETCH_PERIOD分をまとめて取得し、既存データが
+    あればその翌日以降のみを差分取得してPriceHistoryへ追記した上で、
+    DBから期間分を組み立てて返す（途中の欠損は自己修復しない。管理者が
+    行を削除した場合等は当該tickerの全件削除で全量バックフィルに戻せる）。"""
     with session_factory() as session:
         latest_date_str = (
             session.query(PriceHistory.date)
@@ -133,7 +145,17 @@ def fetch_price_history(
         ).days <= 1
 
         if not is_fresh:
-            history = _fetch_price_history_from_yfinance(ticker_symbol, _MAX_FETCH_PERIOD)
+            if latest_date_str is None:
+                history = _fetch_price_history_from_yfinance(
+                    ticker_symbol, period=_MAX_FETCH_PERIOD
+                )
+            else:
+                start_date = datetime.date.fromisoformat(
+                    latest_date_str
+                ) + datetime.timedelta(days=1)
+                history = _fetch_price_history_from_yfinance(
+                    ticker_symbol, start_date=start_date
+                )
             _upsert_price_history(session, ticker_symbol, history)
             session.commit()
 

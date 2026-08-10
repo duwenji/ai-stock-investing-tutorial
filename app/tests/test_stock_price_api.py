@@ -13,7 +13,7 @@ class FakeTicker:
     def __init__(self, symbol):
         self.symbol = symbol
 
-    def history(self, period="1mo"):
+    def history(self, period=None, start=None):
         dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=3, freq="D")
         return pd.DataFrame(
             {
@@ -87,9 +87,9 @@ def test_fetch_price_history_reuses_db_on_second_call(monkeypatch, tmp_path):
     call_count = {"n": 0}
 
     class CountingTicker(FakeTicker):
-        def history(self, period="1mo"):
+        def history(self, period=None, start=None):
             call_count["n"] += 1
-            return super().history(period=period)
+            return super().history(period=period, start=start)
 
     monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
@@ -107,9 +107,9 @@ def test_fetch_price_history_refetches_when_stale(monkeypatch, tmp_path):
     call_count = {"n": 0}
 
     class CountingTicker(FakeTicker):
-        def history(self, period="1mo"):
+        def history(self, period=None, start=None):
             call_count["n"] += 1
-            return super().history(period=period)
+            return super().history(period=period, start=start)
 
     monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
@@ -128,6 +128,64 @@ def test_fetch_price_history_refetches_when_stale(monkeypatch, tmp_path):
 
     stock_price_api.fetch_price_history("TEST1.T", session_factory=session_factory)
     assert call_count["n"] == 1
+
+
+def test_fetch_price_history_uses_incremental_start_date_when_stale_data_exists(
+    monkeypatch, tmp_path
+):
+    captured_calls = []
+
+    class RecordingTicker(FakeTicker):
+        def history(self, period=None, start=None):
+            captured_calls.append({"period": period, "start": start})
+            return super().history()
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", RecordingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    old_date = datetime.date.today() - datetime.timedelta(days=10)
+    with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="TEST1.T"))
+        session.add(
+            stock_price_api.PriceHistory(
+                ticker="TEST1.T",
+                date=old_date.isoformat(),
+                open=1,
+                high=1,
+                low=1,
+                close=1,
+                volume=1,
+            )
+        )
+        session.commit()
+
+    stock_price_api.fetch_price_history("TEST1.T", session_factory=session_factory)
+
+    assert len(captured_calls) == 1
+    assert captured_calls[0]["period"] is None
+    assert captured_calls[0]["start"] == (old_date + datetime.timedelta(days=1)).isoformat()
+
+
+def test_fetch_price_history_uses_full_period_when_no_existing_data(monkeypatch, tmp_path):
+    captured_calls = []
+
+    class RecordingTicker(FakeTicker):
+        def history(self, period=None, start=None):
+            captured_calls.append({"period": period, "start": start})
+            return super().history()
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", RecordingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_price_history("TEST1.T", session_factory=session_factory)
+
+    assert len(captured_calls) == 1
+    assert captured_calls[0]["start"] is None
+    assert captured_calls[0]["period"] == stock_price_api._MAX_FETCH_PERIOD
 
 
 def test_upsert_price_history_skips_existing_dates(tmp_path):
