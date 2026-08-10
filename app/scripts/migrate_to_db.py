@@ -12,6 +12,7 @@ from pathlib import Path
 import bcrypt
 from sqlalchemy.orm import Session
 
+from data_api.stock_price_api import ensure_company_profile_stub
 from db.engine import DATA_DIR, SessionLocal, engine, init_db
 from db.models import Holding, SectorDisplaySetting, Strategy, User
 from sector_analysis.display_settings import _normalize
@@ -55,6 +56,7 @@ def migrate_holdings(session: Session, user_id: int, path: Path = HOLDINGS_PATH)
         ticker = holding.get("ticker")
         if not ticker:
             continue
+        ensure_company_profile_stub(session, ticker)
         session.add(
             Holding(
                 user_id=user_id,

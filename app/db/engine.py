@@ -98,10 +98,10 @@ def _grant_admin_to_first_user_if_none_exists(engine: Engine) -> None:
 
 
 def _backfill_missing_company_profiles(connection) -> None:
-    """price_history/fundamentals_snapshots/ticker_newsに存在するがcompany_profilesに
-    行が無いtickerに対して、tickerのみのスタブ行を追加する（FK制約を実効化する前に
+    """price_history/fundamentals_snapshots/ticker_news/holdingsに存在するがcompany_profiles
+    に行が無いtickerに対して、tickerのみのスタブ行を追加する（FK制約を実効化する前に
     参照整合性を満たしておくため）。"""
-    for table_name in ("price_history", "fundamentals_snapshots", "ticker_news"):
+    for table_name in ("price_history", "fundamentals_snapshots", "ticker_news", "holdings"):
         connection.execute(
             text(
                 f"INSERT INTO company_profiles (ticker) "
@@ -114,13 +114,15 @@ def _backfill_missing_company_profiles(connection) -> None:
 def _rebuild_table_with_foreign_key_if_missing(
     engine: Engine, table_name: str, columns: list[str]
 ) -> None:
-    """table_nameのticker列にFK制約が未宣言なら、テーブルを作り直して制約を追加する
-    （SQLiteはALTER TABLEでのFK制約後付けに対応していないため）。既にFK制約が
-    宣言済み（新規作成されたテーブル等）なら何もしない。"""
+    """table_nameのticker列にcompany_profiles宛のFK制約が未宣言なら、テーブルを
+    作り直して制約を追加する（SQLiteはALTER TABLEでのFK制約後付けに対応していない
+    ため）。holdingsのようにuser_id -> users.id等、他のFKを既に持つテーブルもある
+    ため、「FKが1つも無いか」ではなく「company_profiles宛のFKがあるか」で判定する
+    （後者を先に持つテーブルは無いはずなので、他のFKは作り直し後も維持される）。"""
     old_table = f"{table_name}_pre_fk_migration"
     with engine.connect() as connection:
         fk_rows = connection.execute(text(f"PRAGMA foreign_key_list({table_name})")).fetchall()
-        if fk_rows:
+        if any(row[2] == "company_profiles" for row in fk_rows):
             return
         try:
             connection.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table}"))
@@ -146,10 +148,11 @@ def _rebuild_table_with_foreign_key_if_missing(
 
 
 def _ensure_market_data_foreign_keys(engine: Engine) -> None:
-    """price_history/fundamentals_snapshots/ticker_newsのticker列に、company_profiles.ticker
-    への外部キー制約を実効化する。(1) 各テーブルに存在するがcompany_profilesに無い
-    tickerをスタブ行として先に補完し、(2) FK制約が未宣言のテーブルのみ作り直す。
-    新規作成されたばかりのDBでは(1)(2)とも対象が無いため実質何もしない。"""
+    """price_history/fundamentals_snapshots/ticker_news/holdingsのticker列に、
+    company_profiles.tickerへの外部キー制約を実効化する。(1) 各テーブルに存在するが
+    company_profilesに無いtickerをスタブ行として先に補完し、(2) company_profiles宛の
+    FK制約が未宣言のテーブルのみ作り直す。新規作成されたばかりのDBでは(1)(2)とも
+    対象が無いため実質何もしない。"""
     with engine.connect() as connection:
         _backfill_missing_company_profiles(connection)
         connection.commit()
@@ -177,6 +180,9 @@ def _ensure_market_data_foreign_keys(engine: Engine) -> None:
     )
     _rebuild_table_with_foreign_key_if_missing(
         engine, "ticker_news", ["id", "ticker", "title", "publisher", "link", "fetched_at"]
+    )
+    _rebuild_table_with_foreign_key_if_missing(
+        engine, "holdings", ["id", "user_id", "ticker", "shares", "cost"]
     )
 
 

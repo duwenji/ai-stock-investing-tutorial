@@ -32,7 +32,7 @@ class Holding(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    ticker: Mapped[str] = mapped_column(nullable=False)
+    ticker: Mapped[str] = mapped_column(ForeignKey("company_profiles.ticker"), nullable=False)
     shares: Mapped[float] = mapped_column(nullable=False)
     cost: Mapped[float] = mapped_column(nullable=False)
 

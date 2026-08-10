@@ -41,7 +41,7 @@ def _period_to_start_date(period: str) -> datetime.date:
     return datetime.date.today() - datetime.timedelta(days=days)
 
 
-def _ensure_company_profile_stub(session, ticker_symbol: str) -> None:
+def ensure_company_profile_stub(session, ticker_symbol: str) -> None:
     """price_history等への書き込み前に、company_profilesへ参照先スタブ行が無ければ
     作成する（tickerにFK制約を張っているため、先に親行が無いと書き込みが失敗する）。
     stock_detail/detail.pyのようにfetch_price_historyをfetch_company_profileより
@@ -68,7 +68,7 @@ def _upsert_price_history(session, ticker_symbol: str, history: pd.DataFrame) ->
     （時系列を蓄積する方針のため）。"""
     if history.empty:
         return
-    _ensure_company_profile_stub(session, ticker_symbol)
+    ensure_company_profile_stub(session, ticker_symbol)
     existing_dates = {
         row.date
         for row in session.query(PriceHistory.date).filter_by(ticker=ticker_symbol).all()
@@ -187,7 +187,7 @@ def fetch_fundamentals(ticker_symbol: str, session_factory=SessionLocal) -> dict
             return _fundamentals_snapshot_to_dict(row)
 
         result = _fetch_fundamentals_from_yfinance(ticker_symbol)
-        _ensure_company_profile_stub(session, ticker_symbol)
+        ensure_company_profile_stub(session, ticker_symbol)
         session.add(
             FundamentalsSnapshot(
                 ticker=ticker_symbol,
@@ -288,7 +288,7 @@ def _insert_new_ticker_news(session, ticker_symbol: str, items: list[dict]) -> N
     linkが無い記事は(ticker, title, publisher)で重複判定する。"""
     if not items:
         return
-    _ensure_company_profile_stub(session, ticker_symbol)
+    ensure_company_profile_stub(session, ticker_symbol)
     existing_links = {
         row.link
         for row in session.query(TickerNews.link)
@@ -501,7 +501,7 @@ def save_price_history_for_ticker(
     with session_factory() as session:
         session.query(PriceHistory).filter_by(ticker=ticker).delete()
         if rows:
-            _ensure_company_profile_stub(session, ticker)
+            ensure_company_profile_stub(session, ticker)
         for row in rows:
             session.add(
                 PriceHistory(
@@ -551,7 +551,7 @@ def save_fundamentals_snapshots_for_ticker(
     with session_factory() as session:
         session.query(FundamentalsSnapshot).filter_by(ticker=ticker).delete()
         if rows:
-            _ensure_company_profile_stub(session, ticker)
+            ensure_company_profile_stub(session, ticker)
         for row in rows:
             session.add(
                 FundamentalsSnapshot(

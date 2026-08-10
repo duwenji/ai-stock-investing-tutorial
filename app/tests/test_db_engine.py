@@ -395,3 +395,84 @@ def test_init_db_market_data_migration_is_idempotent(tmp_path):
     session_factory = sessionmaker(bind=engine)
     with session_factory() as session:
         assert session.query(PriceHistory).count() == 0
+
+
+def test_holdings_ticker_foreign_key_enforced(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        user = User(username="taro", hashed_password="hashed")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+        session.add(Holding(user_id=user.id, ticker="NOPROFILE.T", shares=1.0, cost=1.0))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_init_db_migrates_legacy_holdings_table_that_already_has_a_users_foreign_key(tmp_path):
+    """holdingsはuser_id -> users.idのFKを本制約導入前から持っており、
+    「FKが1つも無いテーブルだけ作り直す」という単純な判定ではticker FKの
+    追加漏れを見逃す。company_profiles宛のFKが無い場合に限って作り直す
+    ことを検証する回帰テスト。"""
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+                "email TEXT UNIQUE, hashed_password TEXT NOT NULL, created_at DATETIME)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE holdings ("
+                "id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, ticker TEXT NOT NULL, "
+                "shares FLOAT NOT NULL, cost FLOAT NOT NULL, "
+                "FOREIGN KEY(user_id) REFERENCES users (id))"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO users (id, username, hashed_password) VALUES (1, 'taro', 'h')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO holdings (user_id, ticker, shares, cost) "
+                "VALUES (1, '9999.T', 100, 2500)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        row = session.query(Holding).filter_by(ticker="9999.T").one()
+        assert row.shares == 100.0
+
+        profile = session.get(CompanyProfile, "9999.T")
+        assert profile is not None
+
+        # ticker FKが実効化されている
+        session.add(Holding(user_id=1, ticker="NOPROFILE.T", shares=1.0, cost=1.0))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+        # 作り直し後もuser_id FKが失われていない
+        session.add(Holding(user_id=999, ticker="9999.T", shares=1.0, cost=1.0))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()

@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 
 from admin import delete_user, list_users, set_admin_status
 from db.engine import create_db_engine, init_db
-from db.models import Holding, SectorDisplaySetting, Strategy, User
+from db.models import CompanyProfile, Holding, SectorDisplaySetting, Strategy, User
 
 
 @pytest.fixture
@@ -61,6 +61,7 @@ def test_delete_user_removes_user_and_related_data(session_factory):
         session.refresh(user)
         user_id = user.id
 
+        session.add(CompanyProfile(ticker="7203.T"))
         session.add(Holding(user_id=user_id, ticker="7203.T", shares=1.0, cost=1.0))
         session.add(Strategy(user_id=user_id, strategy_name="A", strategy_json="{}"))
         session.add(
@@ -90,6 +91,7 @@ def test_delete_user_does_not_affect_other_users(session_factory):
         session.refresh(user2)
         user1_id, user2_id = user1.id, user2.id
 
+        session.add(CompanyProfile(ticker="7203.T"))
         session.add(Holding(user_id=user2_id, ticker="7203.T", shares=1.0, cost=1.0))
         session.commit()
 

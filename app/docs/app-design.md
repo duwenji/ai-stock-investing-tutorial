@@ -972,6 +972,7 @@ erDiagram
     company_profiles ||--o{ price_history : "ticker"
     company_profiles ||--o{ fundamentals_snapshots : "ticker"
     company_profiles ||--o{ ticker_news : "ticker"
+    company_profiles ||--o{ holdings : "ticker"
 
     users {
         int id PK
@@ -1044,7 +1045,7 @@ erDiagram
     }
 ```
 
-`price_history`・`fundamentals_snapshots`・`company_profiles`・`ticker_news` の4テーブルは `ticker`（銘柄コード文字列）をキーに参照される。`company_profiles` を銘柄マスタとして、`price_history`/`fundamentals_snapshots`/`ticker_news` の `ticker` 列には `company_profiles.ticker` への外部キー制約を設定しており（`db/engine.py` で `PRAGMA foreign_keys=ON` を有効化して実効化）、上記ER図の実線はこれを表す。書き込み側（`data_api/stock_price_api.py::_ensure_company_profile_stub`）は、対象tickerの `company_profiles` 行が無ければ書き込み前に空のスタブ行（ticker列のみ）を自動作成するため、`stock_detail/detail.py` のように `fetch_price_history` を `fetch_company_profile` より先に呼ぶ既存の呼び出し順序でも破綻しない。本制約導入前に作られた既存DBに対しては、`db/engine.py::init_db()` が起動時に (1) 孤児ticker（子テーブルにはあるが `company_profiles` に無いticker）をスタブ補完し、(2) FK制約が未宣言のテーブルのみ作り直す、という軽量マイグレーションを自動実行する（SQLiteはALTER TABLEでのFK制約後付けに対応していないため）。なお `holdings.ticker` はユーザーの保有銘柄自由入力であり、`company_profiles` へのFKは意図的に張っていない（保有銘柄と銘柄マスタは独立管理）。
+`price_history`・`fundamentals_snapshots`・`company_profiles`・`ticker_news`・`holdings` の5テーブルは `ticker`（銘柄コード文字列）をキーに参照される。`company_profiles` を銘柄マスタとして、`price_history`/`fundamentals_snapshots`/`ticker_news`/`holdings` の `ticker` 列には `company_profiles.ticker` への外部キー制約を設定しており（`db/engine.py` で `PRAGMA foreign_keys=ON` を有効化して実効化）、上記ER図の実線はこれを表す。書き込み側（`data_api/stock_price_api.py::ensure_company_profile_stub`、`portfolio_management/storage.py::save_holdings`・`scripts/migrate_to_db.py::migrate_holdings` から利用）は、対象tickerの `company_profiles` 行が無ければ書き込み前に空のスタブ行（ticker列のみ）を自動作成するため、`stock_detail/detail.py` のように `fetch_price_history` を `fetch_company_profile` より先に呼ぶ既存の呼び出し順序でも破綻しない。本制約導入前に作られた既存DBに対しては、`db/engine.py::init_db()` が起動時に (1) 孤児ticker（子テーブルにはあるが `company_profiles` に無いticker）をスタブ補完し、(2) `company_profiles` 宛のFK制約が未宣言のテーブルのみ作り直す、という軽量マイグレーションを自動実行する（SQLiteはALTER TABLEでのFK制約後付けに対応していないため）。`holdings` は移行前から `user_id -> users.id` のFKを持つため、「FKが1つも無いか」ではなく「`company_profiles` 宛のFKがあるか」で判定し、既存のFKを失わずに作り直す。
 
 #### テーブルの用途
 

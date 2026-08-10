@@ -1,5 +1,6 @@
 """保有銘柄一覧（holdings）をDBで永続化・読み込みするモジュール。"""
 
+from data_api.stock_price_api import ensure_company_profile_stub
 from db.engine import SessionLocal
 from db.models import Holding
 
@@ -24,6 +25,7 @@ def save_holdings(user_id: int, holdings: list[dict], session_factory=SessionLoc
     with session_factory() as session:
         session.query(Holding).filter_by(user_id=user_id).delete()
         for holding in holdings:
+            ensure_company_profile_stub(session, holding["ticker"])
             session.add(
                 Holding(
                     user_id=user_id,

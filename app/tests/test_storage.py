@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from db.engine import create_db_engine, init_db
-from db.models import User
+from db.models import CompanyProfile, User
 from portfolio_management.storage import load_holdings, save_holdings
 
 
@@ -45,3 +45,10 @@ def test_holdings_are_scoped_per_user(session_factory):
     assert load_holdings(2, session_factory=session_factory) == [
         {"ticker": "B", "shares": 2.0, "cost": 2.0}
     ]
+
+
+def test_save_holdings_creates_company_profile_stub_for_new_ticker(session_factory):
+    save_holdings(1, [{"ticker": "9999.T", "shares": 1.0, "cost": 1.0}], session_factory=session_factory)
+
+    with session_factory() as session:
+        assert session.get(CompanyProfile, "9999.T") is not None
