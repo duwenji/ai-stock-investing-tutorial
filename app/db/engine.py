@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Base
@@ -37,14 +38,27 @@ def init_db(engine: Engine) -> None:
     _grant_admin_to_first_user_if_none_exists(engine)
 
 
+def _add_column_if_missing(connection, existing_columns: set, column: str, ddl_type: str) -> None:
+    """列が無ければALTER TABLEで追加する。Streamlitのホットリロード等でinit_db()が
+    ほぼ同時に複数回実行され、片方が追加した直後にもう片方も追加を試みる競合が
+    起こり得るため、"duplicate column"エラーは（列が既にある証拠として）無視する。"""
+    if column in existing_columns:
+        return
+    try:
+        connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} {ddl_type}"))
+    except OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+        connection.rollback()
+
+
 def _ensure_user_name_columns(engine: Engine) -> None:
     with engine.connect() as connection:
         existing_columns = {
             row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
         }
         for column in ("first_name", "last_name"):
-            if column not in existing_columns:
-                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} TEXT"))
+            _add_column_if_missing(connection, existing_columns, column, "TEXT")
         connection.commit()
 
 
@@ -53,8 +67,7 @@ def _ensure_admin_column(engine: Engine) -> None:
         existing_columns = {
             row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
         }
-        if "is_admin" not in existing_columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0"))
+        _add_column_if_missing(connection, existing_columns, "is_admin", "BOOLEAN DEFAULT 0")
         connection.commit()
 
 

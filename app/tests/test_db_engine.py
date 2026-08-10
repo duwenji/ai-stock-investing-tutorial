@@ -246,3 +246,29 @@ def test_init_db_does_not_override_existing_admin_assignment(tmp_path):
     with session_factory() as session:
         alice = session.query(User).filter_by(username="alice").one()
         assert alice.is_admin is False  # 既にbobがadminなので上書きされない
+
+
+def test_init_db_column_addition_tolerates_concurrent_duplicate_add(tmp_path):
+    """Streamlitのホットリロード等でinit_db()がほぼ同時に複数回実行され、
+    片方がALTER TABLEで列を追加した直後にもう片方も同じ列を追加しようとする
+    競合状態を再現する。2回目の追加が"duplicate column"エラーになっても
+    init_db()全体は例外を送出せず正常終了することを検証する。"""
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+
+    # is_admin列を追加済みの状態から、既存の列一覧に"is_admin"を含めずに
+    # _add_column_if_missingを直接呼び、DB側では既に存在する列への
+    # ALTER TABLEが実際に発生するようにする
+    from db.engine import _add_column_if_missing
+
+    with engine.connect() as connection:
+        _add_column_if_missing(connection, existing_columns=set(), column="is_admin", ddl_type="BOOLEAN DEFAULT 0")
+        connection.commit()
+
+    with engine.connect() as connection:
+        columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
+        }
+    assert "is_admin" in columns
