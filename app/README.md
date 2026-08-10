@@ -27,6 +27,15 @@ cd app
 uv sync
 ```
 
+認証用のCookie署名キーをローカル専用の`.streamlit/secrets.toml`に設定してください（`.gitignore`対象、リポジトリには含まれません）。
+
+```bash
+mkdir -p .streamlit
+python -c "import secrets; print(f'auth_cookie_key = \"{secrets.token_hex(32)}\"')" > .streamlit/secrets.toml
+```
+
+初回起動後、画面の「新規登録」フォームからアカウントを作成してください。
+
 ## 起動
 
 ```bash

@@ -6,6 +6,9 @@ __pycache__/
 # Env
 .env
 
+# Streamlit secrets（認証用Cookie署名キーなど、コミットしない）
+.streamlit/secrets.toml
+
 # Runtime data
 data/
 logs/
