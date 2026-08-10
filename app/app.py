@@ -93,8 +93,7 @@ if auth_status is not True:
         st.error(str(exc))
     st.stop()
 
-if "user_id" not in st.session_state:
-    st.session_state["user_id"] = get_user_id(st.session_state["username"])
+st.session_state["user_id"] = get_user_id(st.session_state["username"])
 
 authenticator.logout(location="sidebar")
 st.sidebar.caption(
