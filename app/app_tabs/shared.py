@@ -18,10 +18,13 @@ from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm
-from data_api.stock_price_api import fetch_japanese_name, fetch_news, fetch_price_history
+from data_api.stock_price_api import (
+    fetch_japanese_name,
+    fetch_news,
+    fetch_price_history,
+    load_all_company_profiles,
+)
 from prompt_patterns.sector_rotation import generate_sector_rotation_comments
-from screening.sectors import SECTOR_MAP
-from screening.universe import UNIVERSE
 from sector_analysis.correlation import compute_lead_lag_pairs, compute_sector_returns
 from sector_analysis.wavelet import compute_all_pairs_dominant_lag, serialize_sector_returns
 from stock_detail.detail import generate_stock_detail
@@ -321,12 +324,21 @@ def run_or_load_sector_rotation(period: str, force_regenerate: bool) -> dict | N
     ペイロード（pairs/sector_returns/network_pairs/comments/
     ticker_latest_return_pct等）を返す。分析可能な銘柄が1件もない場合はNoneを返す。
 
+    対象銘柄は company_profiles のうち sector_jp（東証17業種区分）が設定されて
+    いるものに限る（業種バケット化が前提の分析のため）。
+
     セクタータブ・AI戦略ビルダータブの両方から呼ばれる共通処理。同一の
-    period・UNIVERSEであればディスクキャッシュを共有し、二重計算を避ける。
+    period・対象銘柄集合であればディスクキャッシュを共有し、二重計算を避ける。
     実行結果は st.session_state["sector_payload"] にも保存する。
     """
+    company_profiles = load_all_company_profiles()
+    sector_jp_by_ticker = {
+        p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
+    }
+    sector_universe = sorted(sector_jp_by_ticker)
+
     cache_key = "sector-rotation-" + hashlib.sha256(
-        f"{period}-{'-'.join(sorted(UNIVERSE))}".encode("utf-8")
+        f"{period}-{'-'.join(sector_universe)}".encode("utf-8")
     ).hexdigest()[:12]
     cached_payload = None if force_regenerate else read_cache(CACHE_DIR, cache_key)
     payload = json.loads(cached_payload) if cached_payload is not None else None
@@ -342,11 +354,11 @@ def run_or_load_sector_rotation(period: str, force_regenerate: bool) -> dict | N
         with log_duration(logger, f"セクターローテーション分析実行（{period}）"):
             skipped_tickers = []
             prices_by_ticker = {}
-            with st.spinner(f"株価データを取得中...（{len(UNIVERSE)}銘柄）"):
+            with st.spinner(f"株価データを取得中...（{len(sector_universe)}銘柄）"):
                 price_results = map_concurrently(
-                    UNIVERSE, lambda ticker: cached_fetch_price_history(ticker, period)
+                    sector_universe, lambda ticker: cached_fetch_price_history(ticker, period)
                 )
-            for ticker in UNIVERSE:
+            for ticker in sector_universe:
                 history = price_results[ticker]
                 if isinstance(history, Exception) or history is None or history.empty:
                     skipped_tickers.append(ticker)
@@ -365,8 +377,10 @@ def run_or_load_sector_rotation(period: str, force_regenerate: bool) -> dict | N
                 if len(daily_returns) >= 2 and pd.notna(daily_returns.iloc[-1]):
                     ticker_latest_return_pct[ticker] = float(daily_returns.iloc[-1] * 100)
 
-            sector_returns = compute_sector_returns(prices_by_ticker, SECTOR_MAP)
-            excluded_sectors = sorted(set(SECTOR_MAP.values()) - set(sector_returns.keys()))
+            sector_returns = compute_sector_returns(prices_by_ticker, sector_jp_by_ticker)
+            excluded_sectors = sorted(
+                set(sector_jp_by_ticker.values()) - set(sector_returns.keys())
+            )
             pairs = compute_lead_lag_pairs(sector_returns, max_lag_days=20)
             with st.spinner("ネットワーク図データを計算中（136ペア）..."):
                 network_pairs_df = compute_all_pairs_dominant_lag(sector_returns)
