@@ -654,3 +654,211 @@ def test_fetch_company_profile_logs_request_and_response(monkeypatch, caplog, tm
     assert "company profileリクエスト: ticker=7203.T" in caplog.text
     assert "company profileレスポンス: ticker=7203.T" in caplog.text
     assert "Auto Manufacturers" in caplog.text
+
+
+def test_load_price_history_for_ticker_returns_rows_sorted_by_date(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            stock_price_api.PriceHistory(
+                ticker="7203.T", date="2026-01-02", open=2, high=2, low=2, close=2, volume=2
+            )
+        )
+        session.add(
+            stock_price_api.PriceHistory(
+                ticker="7203.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
+            )
+        )
+        session.commit()
+
+    rows = stock_price_api.load_price_history_for_ticker(
+        "7203.T", session_factory=session_factory
+    )
+    assert [r["date"] for r in rows] == ["2026-01-01", "2026-01-02"]
+    assert rows[0]["open"] == 1.0
+
+
+def test_save_price_history_for_ticker_replaces_existing_rows(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_price_history_for_ticker(
+        "7203.T",
+        [
+            {
+                "date": "2026-01-01",
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            }
+        ],
+        session_factory=session_factory,
+    )
+    stock_price_api.save_price_history_for_ticker(
+        "7203.T",
+        [
+            {
+                "date": "2026-01-02",
+                "open": 2.0,
+                "high": 2.0,
+                "low": 2.0,
+                "close": 2.0,
+                "volume": 2.0,
+            }
+        ],
+        session_factory=session_factory,
+    )
+
+    rows = stock_price_api.load_price_history_for_ticker(
+        "7203.T", session_factory=session_factory
+    )
+    assert [r["date"] for r in rows] == ["2026-01-02"]
+
+
+def test_save_price_history_for_ticker_does_not_affect_other_tickers(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_price_history_for_ticker(
+        "AAA.T",
+        [
+            {
+                "date": "2026-01-01",
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            }
+        ],
+        session_factory=session_factory,
+    )
+    stock_price_api.save_price_history_for_ticker(
+        "BBB.T",
+        [
+            {
+                "date": "2026-01-01",
+                "open": 2.0,
+                "high": 2.0,
+                "low": 2.0,
+                "close": 2.0,
+                "volume": 2.0,
+            }
+        ],
+        session_factory=session_factory,
+    )
+    stock_price_api.save_price_history_for_ticker("AAA.T", [], session_factory=session_factory)
+
+    assert (
+        stock_price_api.load_price_history_for_ticker("AAA.T", session_factory=session_factory)
+        == []
+    )
+    bbb_rows = stock_price_api.load_price_history_for_ticker(
+        "BBB.T", session_factory=session_factory
+    )
+    assert len(bbb_rows) == 1
+
+
+def test_load_fundamentals_snapshots_for_ticker_returns_all_fields(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            stock_price_api.FundamentalsSnapshot(
+                ticker="7203.T", snapshot_date="2026-01-01", trailing_pe=12.3, market_cap=1000
+            )
+        )
+        session.commit()
+
+    rows = stock_price_api.load_fundamentals_snapshots_for_ticker(
+        "7203.T", session_factory=session_factory
+    )
+    assert len(rows) == 1
+    assert rows[0]["snapshot_date"] == "2026-01-01"
+    assert rows[0]["trailing_pe"] == 12.3
+    assert rows[0]["market_cap"] == 1000
+
+
+def test_save_fundamentals_snapshots_for_ticker_replaces_existing_rows(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_fundamentals_snapshots_for_ticker(
+        "7203.T",
+        [{"snapshot_date": "2026-01-01", "trailing_pe": 10.0}],
+        session_factory=session_factory,
+    )
+    stock_price_api.save_fundamentals_snapshots_for_ticker(
+        "7203.T",
+        [{"snapshot_date": "2026-01-02", "trailing_pe": 20.0}],
+        session_factory=session_factory,
+    )
+
+    rows = stock_price_api.load_fundamentals_snapshots_for_ticker(
+        "7203.T", session_factory=session_factory
+    )
+    assert [r["snapshot_date"] for r in rows] == ["2026-01-02"]
+    assert rows[0]["trailing_pe"] == 20.0
+
+
+def test_load_company_profile_returns_none_when_missing(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    assert (
+        stock_price_api.load_company_profile("7203.T", session_factory=session_factory) is None
+    )
+
+
+def test_save_company_profile_fields_creates_new_row(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_company_profile_fields(
+        "7203.T",
+        "トヨタ自動車",
+        "Consumer Cyclical",
+        "Auto Manufacturers",
+        "概要",
+        session_factory=session_factory,
+    )
+
+    profile = stock_price_api.load_company_profile("7203.T", session_factory=session_factory)
+    assert profile["name"] == "トヨタ自動車"
+    assert profile["sector"] == "Consumer Cyclical"
+    assert profile["industry"] == "Auto Manufacturers"
+    assert profile["business_summary"] == "概要"
+
+
+def test_save_company_profile_fields_updates_existing_row(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="7203.T", sector="Old"))
+        session.commit()
+
+    stock_price_api.save_company_profile_fields(
+        "7203.T",
+        "トヨタ自動車",
+        "Consumer Cyclical",
+        "Auto Manufacturers",
+        "概要",
+        session_factory=session_factory,
+    )
+
+    profile = stock_price_api.load_company_profile("7203.T", session_factory=session_factory)
+    assert profile["sector"] == "Consumer Cyclical"

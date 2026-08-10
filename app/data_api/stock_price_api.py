@@ -454,3 +454,136 @@ def fetch_universe_price_histories(
                 continue
             prices_by_ticker[ticker] = history["Close"]
         return prices_by_ticker
+
+
+def load_price_history_for_ticker(ticker: str, session_factory=SessionLocal) -> list[dict]:
+    """指定銘柄の株価履歴を全件DBから読み込む（管理者向け）。"""
+    with session_factory() as session:
+        rows = (
+            session.query(PriceHistory)
+            .filter_by(ticker=ticker)
+            .order_by(PriceHistory.date)
+            .all()
+        )
+        return [
+            {
+                "date": row.date,
+                "open": row.open,
+                "high": row.high,
+                "low": row.low,
+                "close": row.close,
+                "volume": row.volume,
+            }
+            for row in rows
+        ]
+
+
+def save_price_history_for_ticker(
+    ticker: str, rows: list[dict], session_factory=SessionLocal
+) -> None:
+    """指定銘柄のPriceHistoryを全置換する（管理者向け）。既存行を全削除し、
+    渡されたrowsを再挿入する（portfolio_management/storage.pyのsave_holdingsと
+    同じ全置換パターン）。"""
+    with session_factory() as session:
+        session.query(PriceHistory).filter_by(ticker=ticker).delete()
+        for row in rows:
+            session.add(
+                PriceHistory(
+                    ticker=ticker,
+                    date=row["date"],
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row["volume"],
+                )
+            )
+        session.commit()
+
+
+def load_fundamentals_snapshots_for_ticker(
+    ticker: str, session_factory=SessionLocal
+) -> list[dict]:
+    """指定銘柄のfundamentalsスナップショットを全件DBから読み込む（管理者向け）。"""
+    with session_factory() as session:
+        rows = (
+            session.query(FundamentalsSnapshot)
+            .filter_by(ticker=ticker)
+            .order_by(FundamentalsSnapshot.snapshot_date)
+            .all()
+        )
+        return [
+            {
+                "snapshot_date": row.snapshot_date,
+                "name": row.name,
+                "trailing_pe": row.trailing_pe,
+                "price_to_book": row.price_to_book,
+                "dividend_yield": row.dividend_yield,
+                "market_cap": row.market_cap,
+                "return_on_equity": row.return_on_equity,
+                "revenue_growth": row.revenue_growth,
+            }
+            for row in rows
+        ]
+
+
+def save_fundamentals_snapshots_for_ticker(
+    ticker: str, rows: list[dict], session_factory=SessionLocal
+) -> None:
+    """指定銘柄のFundamentalsSnapshotを全置換する（管理者向け）。既存行を全削除し、
+    渡されたrowsを再挿入する。"""
+    with session_factory() as session:
+        session.query(FundamentalsSnapshot).filter_by(ticker=ticker).delete()
+        for row in rows:
+            session.add(
+                FundamentalsSnapshot(
+                    ticker=ticker,
+                    snapshot_date=row["snapshot_date"],
+                    name=row.get("name"),
+                    trailing_pe=row.get("trailing_pe"),
+                    price_to_book=row.get("price_to_book"),
+                    dividend_yield=row.get("dividend_yield"),
+                    market_cap=row.get("market_cap"),
+                    return_on_equity=row.get("return_on_equity"),
+                    revenue_growth=row.get("revenue_growth"),
+                )
+            )
+        session.commit()
+
+
+def load_company_profile(ticker: str, session_factory=SessionLocal) -> dict | None:
+    """指定銘柄の企業プロファイルをDBから読み込む（管理者向け）。無ければNoneを
+    返す。"""
+    with session_factory() as session:
+        row = session.get(CompanyProfile, ticker)
+        if row is None:
+            return None
+        return {
+            "ticker": row.ticker,
+            "name": row.name,
+            "sector": row.sector,
+            "industry": row.industry,
+            "business_summary": row.business_summary,
+        }
+
+
+def save_company_profile_fields(
+    ticker: str,
+    name: str | None,
+    sector: str | None,
+    industry: str | None,
+    business_summary: str | None,
+    session_factory=SessionLocal,
+) -> None:
+    """指定銘柄の企業プロファイルを直接UPDATEする（管理者向け）。行が無ければ
+    新規作成する。"""
+    with session_factory() as session:
+        row = session.get(CompanyProfile, ticker)
+        if row is None:
+            row = CompanyProfile(ticker=ticker)
+            session.add(row)
+        row.name = name
+        row.sector = sector
+        row.industry = industry
+        row.business_summary = business_summary
+        session.commit()
