@@ -6,7 +6,6 @@ from common.disclaimer import DISCLAIMER_NOTICE
 from portfolio_management.backtest import (
     STRATEGIES,
     generate_backtest_explanation,
-    run_backtest_comparison,
     run_bollinger_reversal_backtest,
     run_grid_search,
     run_ma_crossover_backtest,
@@ -148,35 +147,27 @@ def test_strategies_registry_contains_all_four_strategies():
     }
 
 
-def test_strategies_registry_entries_have_func_two_presets_and_min_days():
+def test_strategies_registry_entries_have_func_param_grid_and_min_days():
     for definition in STRATEGIES.values():
         assert callable(definition["func"])
-        assert isinstance(definition["presets"], list)
-        assert len(definition["presets"]) == 2
+        assert isinstance(definition["param_grid"], dict)
+        assert len(definition["param_grid"]) == 2
         assert isinstance(definition["min_days"], int)
 
 
-def test_run_backtest_comparison_returns_result_per_preset_label():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+def test_strategies_registry_fixed_params_only_for_three_parameter_strategies():
+    assert "fixed_params" not in STRATEGIES["移動平均クロスオーバー"]
+    assert STRATEGIES["RSI逆張り"]["fixed_params"] == {"overbought": 70}
+    assert STRATEGIES["MACDクロスオーバー"]["fixed_params"] == {"signal": 9}
+    assert "fixed_params" not in STRATEGIES["ボリンジャーバンド逆張り"]
 
-    result = run_backtest_comparison(
-        prices,
-        run_ma_crossover_backtest,
-        presets=[
-            ("A", {"short_window": 1, "long_window": 2}),
-            ("B", {"short_window": 1, "long_window": 2}),
-        ],
-    )
 
-    expected_single = {
-        "total_return_pct": 0.0,
-        "benchmark_return_pct": 2.0,
-        "win_rate_pct": 0.0,
-        "max_drawdown_pct": 0.0,
-        "trade_days": 1,
-    }
-    assert result == {"A": expected_single, "B": expected_single}
+def test_strategies_registry_param_grid_sizes_are_within_grid_search_budget():
+    for definition in STRATEGIES.values():
+        combo_count = 1
+        for values in definition["param_grid"].values():
+            combo_count *= len(list(values))
+        assert 15 <= combo_count <= 40
 
 
 def test_generate_backtest_explanation_includes_disclaimer_and_commentary():
@@ -426,20 +417,6 @@ def test_run_universe_backtest_ranking_falls_back_to_total_return_when_drawdown_
     )
 
     assert result[0]["risk_adjusted_return"] == 15.0
-
-
-def test_run_backtest_comparison_logs_duration(caplog):
-    dates = pd.date_range("2026-01-01", periods=80, freq="D")
-    prices = pd.Series(range(100, 180), index=dates, dtype=float)
-
-    with caplog.at_level(logging.INFO, logger="portfolio_management.backtest"):
-        run_backtest_comparison(
-            prices, run_ma_crossover_backtest, STRATEGIES["移動平均クロスオーバー"]["presets"]
-        )
-
-    assert "バックテスト比較計算" in caplog.text
-    assert "を開始" in caplog.text
-    assert "が完了しました" in caplog.text
 
 
 def test_run_universe_backtest_ranking_logs_duration(caplog):

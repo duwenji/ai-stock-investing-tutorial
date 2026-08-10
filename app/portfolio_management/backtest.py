@@ -237,57 +237,34 @@ def summarize_grid_stability(grid_results: list[dict]) -> dict:
     }
 
 
-# 画面（UI）に表示する戦略の一覧。各戦略の実行関数・プリセットパラメータ・
+# 画面（UI）に表示する戦略の一覧。各戦略の実行関数・グリッドサーチの探索範囲・
 # バックテストに最低限必要な日数（min_days）を紐付けて管理する。
+# param_gridは近傍グリッドサーチで探索する2軸パラメータ。fixed_paramsは
+# 3パラメータ戦略（RSI・MACD）で探索対象外として固定する値。
 STRATEGIES: dict[str, dict] = {
     "移動平均クロスオーバー": {
         "func": run_ma_crossover_backtest,
-        "presets": [
-            ("標準(25/75)", {"short_window": 25, "long_window": 75}),
-            ("短期(5/25)", {"short_window": 5, "long_window": 25}),
-        ],
-        "min_days": 75,
+        "param_grid": {"short_window": range(20, 31, 2), "long_window": range(65, 86, 5)},
+        "min_days": 85,
     },
     "RSI逆張り": {
         "func": run_rsi_reversal_backtest,
-        "presets": [
-            ("標準(14, 30/70)", {"period": 14, "oversold": 30, "overbought": 70}),
-            ("厳格(14, 20/80)", {"period": 14, "oversold": 20, "overbought": 80}),
-        ],
-        "min_days": 14,
+        "param_grid": {"period": range(10, 19), "oversold": range(20, 36, 5)},
+        "fixed_params": {"overbought": 70},
+        "min_days": 18,
     },
     "MACDクロスオーバー": {
         "func": run_macd_crossover_backtest,
-        "presets": [
-            ("標準(12/26/9)", {"fast": 12, "slow": 26, "signal": 9}),
-            ("短期(5/13/5)", {"fast": 5, "slow": 13, "signal": 5}),
-        ],
-        "min_days": 26,
+        "param_grid": {"fast": range(8, 15, 2), "slow": range(20, 31, 2)},
+        "fixed_params": {"signal": 9},
+        "min_days": 30,
     },
     "ボリンジャーバンド逆張り": {
         "func": run_bollinger_reversal_backtest,
-        "presets": [
-            ("標準(20, 2.0σ)", {"window": 20, "num_std": 2.0}),
-            ("タイト(20, 1.5σ)", {"window": 20, "num_std": 1.5}),
-        ],
-        "min_days": 20,
+        "param_grid": {"window": range(15, 26, 2), "num_std": [1.5, 1.75, 2.0, 2.25, 2.5]},
+        "min_days": 25,
     },
 }
-
-
-def run_backtest_comparison(
-    prices: pd.Series,
-    backtest_func,
-    presets: list[tuple[str, dict]],
-    transaction_cost_pct: float = 0.0,
-) -> dict[str, dict]:
-    """同一戦略の複数プリセット（パラメータ設定）でバックテストを実行し、
-    プリセット名ごとの成績を比較できる形でまとめる。"""
-    with log_duration(logger, f"バックテスト比較計算（プリセット{len(presets)}件）"):
-        return {
-            label: backtest_func(prices, transaction_cost_pct=transaction_cost_pct, **params)
-            for label, params in presets
-        }
 
 
 def _format_params(params: dict) -> str:
