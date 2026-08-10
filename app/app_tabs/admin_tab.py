@@ -55,7 +55,10 @@ def _render_strategy_management() -> None:
         key="admin_strategy_table",
     )
     selected_idx = event.selection.rows[0] if event.selection.rows else None
-    if selected_idx is None:
+    # 削除操作直後のrerunでは、テーブルのウィジェット選択状態が古いインデックスを
+    # 保持したままのことがあり、削除後に一覧が短くなっていると範囲外になり得るため
+    # 明示的にチェックする
+    if selected_idx is None or selected_idx >= len(strategies):
         return
 
     selected = strategies[selected_idx]
@@ -107,7 +110,10 @@ def _render_user_management() -> None:
         key="admin_user_table",
     )
     selected_idx = event.selection.rows[0] if event.selection.rows else None
-    if selected_idx is None:
+    # 削除操作直後のrerunでは、テーブルのウィジェット選択状態が古いインデックスを
+    # 保持したままのことがあり、削除後に一覧が短くなっていると範囲外になり得るため
+    # 明示的にチェックする
+    if selected_idx is None or selected_idx >= len(users):
         return
 
     selected = users[selected_idx]
