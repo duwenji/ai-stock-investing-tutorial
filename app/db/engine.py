@@ -196,12 +196,27 @@ def _rebuild_table_with_foreign_key_if_missing(
             return
         try:
             connection.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table}"))
-            connection.commit()
         except OperationalError:
             # Streamlitのホットリロード等でinit_db()がほぼ同時に複数回実行され、
             # 別プロセスが既にリネーム・再作成を完了させていた場合はスキップする
             connection.rollback()
             return
+
+        # SQLiteのALTER TABLE RENAMEは明示的に名前を付けたインデックス（例:
+        # index=Trueが生成するix_<table>_ticker）を追従してリネームしない
+        # （インデックス自体は旧テーブル名のまま残り、参照先だけがリネーム後の
+        # テーブルに切り替わる）。放置すると新テーブル作成時に同名インデックスの
+        # 作成で衝突するため、旧テーブルに付いたインデックスは作り直し前に
+        # 明示的に削除する（旧テーブル自体もこの後DROPするため実害はない）。
+        index_rows = connection.execute(text(f"PRAGMA index_list({old_table})")).fetchall()
+        for index_row in index_rows:
+            index_name = index_row[1]
+            if index_name.startswith("sqlite_autoindex_"):
+                # UNIQUE制約由来の自動生成インデックスはDROP INDEX不可であり、
+                # 旧テーブルごとDROPされるため個別の削除は不要
+                continue
+            connection.execute(text(f"DROP INDEX {index_name}"))
+        connection.commit()
 
     Base.metadata.tables[table_name].create(bind=engine)
 

@@ -355,6 +355,14 @@ def test_init_db_migrates_legacy_price_history_table_to_add_foreign_key(tmp_path
                 "UNIQUE (ticker, date))"
             )
         )
+        # 実際の旧スキーマ（FK追加前）は ticker: Mapped[str] = mapped_column(..., index=True)
+        # により明示的な単独インデックスも持っていた。これを再現しないと、
+        # ALTER TABLE RENAME後もインデックス名だけは旧テーブル側に残る
+        # というSQLiteの挙動由来のバグ（新テーブル作成時の同名インデックス
+        # 衝突）を検出できない。
+        connection.execute(
+            text("CREATE INDEX ix_price_history_ticker ON price_history (ticker)")
+        )
         connection.execute(
             text(
                 "INSERT INTO price_history (ticker, date, open, high, low, close, volume) "
@@ -586,3 +594,68 @@ def test_init_db_seeds_default_company_profiles_from_real_seed_file(tmp_path):
         assert profile is not None
         assert profile.name
         assert profile.sector_jp
+
+
+def test_init_db_migrates_multiple_legacy_tables_each_with_their_own_ticker_index(tmp_path):
+    """本番DBで実際に起きた回帰の再現: price_history/fundamentals_snapshots/
+    ticker_newsはいずれも旧スキーマの時点でticker列に単独インデックス
+    （index=True由来）を持っていた。1回のinit_db()呼び出しで複数テーブルを
+    連続して作り直す際、1つ目のテーブルの処理で放置されたインデックス名の
+    衝突が2つ目以降のテーブルには影響しない（＝各テーブルの処理が独立して
+    正しく完了する）ことを検証する。"""
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE price_history ("
+                "id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, date TEXT NOT NULL, "
+                "open FLOAT NOT NULL, high FLOAT NOT NULL, low FLOAT NOT NULL, "
+                "close FLOAT NOT NULL, volume FLOAT NOT NULL, "
+                "UNIQUE (ticker, date))"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX ix_price_history_ticker ON price_history (ticker)")
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE fundamentals_snapshots ("
+                "id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, snapshot_date TEXT NOT NULL, "
+                "name TEXT, trailing_pe FLOAT, price_to_book FLOAT, dividend_yield FLOAT, "
+                "market_cap FLOAT, return_on_equity FLOAT, revenue_growth FLOAT, "
+                "UNIQUE (ticker, snapshot_date))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX ix_fundamentals_snapshots_ticker "
+                "ON fundamentals_snapshots (ticker)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO price_history (ticker, date, open, high, low, close, volume) "
+                "VALUES ('9999.T', '2026-01-01', 10, 11, 9, 10, 100)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO fundamentals_snapshots (ticker, snapshot_date, trailing_pe) "
+                "VALUES ('8888.T', '2026-01-01', 12.3)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        price_row = session.query(PriceHistory).filter_by(ticker="9999.T").one()
+        assert price_row.date == "2026-01-01"
+
+        fundamentals_row = (
+            session.query(FundamentalsSnapshot).filter_by(ticker="8888.T").one()
+        )
+        assert fundamentals_row.trailing_pe == 12.3
