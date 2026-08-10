@@ -83,7 +83,7 @@ app/
     evaluation.py                  # build_evaluate_prompt, evaluate_strategy, run_evaluation_loop
                                     # （Evaluator-Optimizer: 確定候補の自動評価・改善ループ）
     sector_insight.py              # build_watchlist_from_rotation（業種ローテーションからの銘柄提案）
-    storage.py                     # load_strategies / save_strategy（strategies.json永続化）
+    storage.py                     # load_strategies / save_strategy（DB, strategiesテーブル永続化）
   screening/
     universe.py                   # 固定スクリーニング/バックテスト対象ユニバース（228銘柄＝日経225と既存銘柄の和集合、日本語名付き）
     sectors.py                    # SECTOR_MAP（UNIVERSE銘柄→東証17業種区分）
@@ -91,7 +91,7 @@ app/
     correlation.py                # compute_sector_returns, compute_lead_lag_pairs（業種別リターン・時差相関計算）
     wavelet.py                    # compute_cross_wavelet_lead_lag ほか（クロスウェーブレット・コヒーレンス、周期帯分類、全ペア集約）
     network.py                    # build_mermaid_lead_lag_graph（周期帯・コヒーレンス閾値でフィルタしたリード・ラグ関係のMermaid図生成）
-    display_settings.py           # load/save_sector_display_settings（セクションの表示ON/OFF・順序・高さのJSON永続化）
+    display_settings.py           # load/save_sector_display_settings（セクションの表示ON/OFF・順序・高さ、DB永続化）
   stock_detail/
     detail.py                     # generate_stock_detail（株価OHLCV/ファンダメンタル/テクニカル/ニュース統合＋AIコメント、キャッシュ付き）
   common/
@@ -100,9 +100,7 @@ app/
     concurrency.py                 # map_concurrently（ThreadPoolExecutorによる並列実行、例外は要素単位で捕捉）
     json_parsing.py                # strip_code_fence（LLM応答のコードフェンス除去）
   data/                             # 実行時生成データ（.gitignore対象）
-    holdings.json                  # 保有銘柄
-    sector_display_settings.json   # セクターローテーションタブの表示設定
-    strategies.json                 # AI戦略ビルダーで確定・保存した戦略一覧
+    app.db                          # SQLiteデータベース（ユーザー固有データ + 全ユーザー共有の市場データ、5.3節参照）
     cache/                          # 日付+ハッシュキー（一部は銘柄コードそのまま）のキャッシュファイル
   tests/                            # pytest
   docs/                             # 本資料・設計書一式、data_j.xls（JPX公式全銘柄一覧。SECTOR_MAPの元データ）
@@ -347,7 +345,7 @@ sequenceDiagram
     participant Cache as cache.py
 
     User->>UI: タブを開く
-    UI->>Storage: load_holdings(holdings.json)
+    UI->>Storage: load_holdings(user_id)
     Storage-->>UI: 保有銘柄リスト（無ければ空リスト）
     UI->>Names: build_candidate_names(holdings, resolve_name=cached_fetch_japanese_name)
     Names-->>UI: 候補銘柄名 dict
@@ -356,7 +354,7 @@ sequenceDiagram
     UI->>UI: 重複チェック→session_stateへ追加 or 「既に一覧にあります」
 
     User->>UI: st.data_editorで編集し「保存」
-    UI->>Storage: save_holdings(holdings.json)
+    UI->>Storage: save_holdings(user_id, holdings)
 
     User->>UI: 保有銘柄一覧の「詳細」ボタン
     UI->>UI: show_stock_detail_dialog(ticker, name)（4.6参照）
@@ -394,10 +392,10 @@ sequenceDiagram
 
 #### ステップ・分岐の説明
 
-1. **保有銘柄の読み込み**: セッション初回のみ `load_holdings()` を呼ぶ。ファイルが無い、または壊れている（JSON decode失敗）場合は空リストにフォールバックし、初期行 `{"ticker": "", "shares": 0, "cost": 0.0}` を1件表示する。
+1. **保有銘柄の読み込み**: セッション初回のみ `load_holdings(user_id)` を呼ぶ。DBに該当ユーザーの行が1件も無ければ空リストにフォールバックし、初期行 `{"ticker": "", "shares": 0, "cost": 0.0}` を1件表示する。
 2. **銘柄名候補の構築**: `UNIVERSE_NAMES`（228銘柄）に加え、保有銘柄のうちユニバース外のティッカーは `fetch_japanese_name` で名前解決する。この関数は `app_tabs/shared.py` の `cached_fetch_japanese_name`（`st.cache_data(ttl=24h)`）でラップされており、同一ティッカーへの重複リクエストを抑制する。
 3. **銘柄の検索・追加**: セレクトボックスで `"ティッカー 銘柄名"` の形式から選び、「追加」ボタン押下時のみ `session_state["holdings_rows"]` に反映する。**既に一覧にあるティッカー**を選んだ場合は追加せず `st.info` で通知する（分岐）。
-4. **編集・保存**: `st.data_editor` は行の追加・削除・編集を許可する（`num_rows="dynamic"`）。「保存」ボタンを押すまでファイルには反映されず、ティッカーが空の行は保存時に除外される。
+4. **編集・保存**: `st.data_editor` は行の追加・削除・編集を許可する（`num_rows="dynamic"`）。「保存」ボタンを押すまでDBには反映されず、ティッカーが空の行は保存時に除外される。`save_holdings` は当該ユーザーの既存行を全削除してから渡された全件で置き換える。
 5. **銘柄詳細ダイアログ**: 保存済み保有銘柄ごとに「詳細」ボタンが並び（`key=f"portfolio_detail_{i}_{ticker}"` で行インデックスをキーに含め、同一ティッカー重複時もボタンキーが衝突しないようにしている）、押下すると [4.6](#46-銘柄詳細ダイアログクロスタブ機能) のダイアログが開く。
 6. **レビュー生成のキャッシュ判定**:
    - `cache_key` は `"portfolio-review-"` に保有銘柄の `ticker:shares:cost` を連結したSHA256の先頭12文字を付加したもの。**構成が変われば別キャッシュキーになる**。
@@ -605,7 +603,7 @@ sequenceDiagram
 
 ### 4.5 セクターローテーション
 
-5タブ中もっとも機能が多く、(a) 時差相関に基づく従来分析（ヒートマップ・上位ペア表・AIコメント）、(b) 全業種ペアを俯瞰する**ネットワーク図**、(c) 時間変化するリード・ラグを可視化する**ウェーブレット分析**の3層で構成される。表示するセクションの選択・並び順・チャート高さは「表示設定」expanderからユーザーが調整でき、設定は `data/sector_display_settings.json` に永続化される。
+5タブ中もっとも機能が多く、(a) 時差相関に基づく従来分析（ヒートマップ・上位ペア表・AIコメント）、(b) 全業種ペアを俯瞰する**ネットワーク図**、(c) 時間変化するリード・ラグを可視化する**ウェーブレット分析**の3層で構成される。表示するセクションの選択・並び順・チャート高さは「表示設定」expanderからユーザーが調整でき、設定はDB（`sector_display_settings`テーブル）に永続化される。
 
 #### シーケンス図（分析実行〜結果保存）
 
@@ -671,8 +669,8 @@ sequenceDiagram
 #### 表示設定（`sector_analysis/display_settings.py`）
 
 - 「表示設定」expander内の `st.data_editor` で、5セクション（ヒートマップ／ペア表／AIコメント／ネットワーク図／ウェーブレット分析）それぞれの表示ON/OFFと表示順序（1〜5の整数）を編集できる。ヒートマップ・ネットワーク図・ウェーブレット分析の3セクションは、表示ONの場合のみチャート高さ（250〜900px）のスライダーも表示される。
-- 編集結果が現在の設定と異なる場合のみ `save_sector_display_settings` でJSONファイル（`data/sector_display_settings.json`）に書き込み、次回起動時も設定が引き継がれる。
-- `load_sector_display_settings` はファイル不在・JSON破損・型不正のいずれの場合も `DEFAULT_SECTOR_DISPLAY_SETTINGS`（全セクション表示ON、定義順、高さ500/400/400px）にフォールバックする。旧バージョン（`{"heatmap": true, ...}` のようなフラットなbool辞書のみ）のファイルも読み込み可能で、`visible` として扱い `order`/`height` はデフォルト値で補う。
+- 編集結果が現在の設定と異なる場合のみ `save_sector_display_settings(user_id, settings)` でDB（`sector_display_settings`テーブル、ユーザーごとに1行）に書き込み、次回起動時も設定が引き継がれる。
+- `load_sector_display_settings(user_id)` はDBに該当ユーザーの行が無い・型不正のいずれの場合も `DEFAULT_SECTOR_DISPLAY_SETTINGS`（全セクション表示ON、定義順、高さ500/400/400px）にフォールバックする（`_normalize`）。旧バージョン形式（`{"heatmap": true, ...}` のようなフラットなbool辞書のみ、DB化前のJSONファイルからの移行データに残り得る）も読み込み可能で、`visible` として扱い `order`/`height` はデフォルト値で補う。
 - 実際の描画順序は `app_tabs/sector/tab.py` 側で `section_renderers` dictを `display_settings["order"]` の値でソートして決定する。ヒートマップ・ペア表・AIコメントの3セクションは、有効な業種ペア（`pairs`）が1件もない場合は表示設定に関わらずスキップされる。
 
 #### 各セクションの内容
@@ -845,7 +843,7 @@ sequenceDiagram
         end
     end
     User->>UI: 「この条件で確定する」
-    UI->>Storage: save_strategy(strategies.json, strategy)
+    UI->>Storage: save_strategy(user_id, strategy)
     UI-->>User: 「戦略「...」を保存しました。」
 ```
 
@@ -855,8 +853,8 @@ sequenceDiagram
 2. **②対話の実行**: `call_llm` はステートレスなサブプロセス呼び出しのため、ターンごとに会話全履歴を`build_dialogue_prompt`でまとめて再送信する。最後のターンがユーザー発言で確定候補が未確定の場合のみLLMを呼ぶ（同一状態での再実行時に重複呼び出ししないための判定）。
 3. **確定候補の判定（`parse_dialogue_response`）**: LLM応答が`strategy_name`と`conditions`を含むJSONコードブロックとしてパースできれば`kind: "strategy"`、それ以外（パース不可・キー欠落を含む）は`kind: "question"`として会話に追加する。この判定自体が「ユーザーと合意できるまで確定させない」緩やかな確認プロセスとして機能する。
 4. **確定候補の自動評価・改善（Evaluator-Optimizer、`strategy_builder/evaluation.py`）**: `kind: "strategy"`と判定された直後、`run_evaluation_loop`を1回だけ実行する。評価基準は (a) 条件が具体的か (b) 対象銘柄が0件になりそうな過度な絞り込みでないか (c) 断定的な投資助言表現を含まないか、の3点で、`evaluate_strategy`がJSONパースに失敗、または`pass`キーを含まない場合は安全側に倒し不合格として扱う。不合格時は`build_refinement_prompt`（対話ペルソナ指示は使わない軽量プロンプト）で修正案を生成し、応答が無効なJSON、または`conditions`キーを欠く場合はそのイテレーションをスキップし直前の候補のまま次の評価に進む。最大3イテレーションで打ち切り、最後の評価の後には改善案を生成しない（無駄な`call_llm`を避ける）。
-5. **確認ステップ（Verification、既存の確認UIとの統合）**: 評価・改善ループ後の最終案を`st.json`で表示する（`iterations > 0`の場合は「AIによる自動改善を行いました。」というキャプションと評価フィードバックを追加表示）。**「この条件で確定する」ボタンを押すまで`strategies.json`には一切保存されない**。「さらに対話を続ける」を選んだ場合は候補・評価結果をクリアし対話を継続する。
-6. **保存済み戦略の読み込み**: `load_strategies`で`strategies.json`から一覧を取得し、選択後「この戦略を読み込む」を押すと`strategy_confirmed`に直接反映される（この経路は既に確定・保存済みのためEvaluator-Optimizerループを経由しない）。
+5. **確認ステップ（Verification、既存の確認UIとの統合）**: 評価・改善ループ後の最終案を`st.json`で表示する（`iterations > 0`の場合は「AIによる自動改善を行いました。」というキャプションと評価フィードバックを追加表示）。**「この条件で確定する」ボタンを押すまでDB（`strategies`テーブル）には一切保存されない**。「さらに対話を続ける」を選んだ場合は候補・評価結果をクリアし対話を継続する。
+6. **保存済み戦略の読み込み**: `load_strategies(user_id)`でDBから該当ユーザーの一覧を取得し、選択後「この戦略を読み込む」を押すと`strategy_confirmed`に直接反映される（この経路は既に確定・保存済みのためEvaluator-Optimizerループを経由しない）。
 7. **③バックテスト検証**: `strategy_confirmed`（②で確定、または読み込んだ戦略）が無ければ実行不可。`apply_strategy_conditions`でUNIVERSE 228銘柄を現在の財務指標で絞り込み、該当銘柄群を`run_strategy_backtest`（各銘柄をその銘柄自身の開始日=100に正規化して均等配分・保有した場合の資産推移）でシミュレーションする。過去の各時点で同条件を満たしていたかは考慮しないため**先読みバイアスを含む**旨をキャプションと免責事項で明示する。
 8. **④最新データでの銘柄選定**: `apply_strategy_conditions`→`sort_by_strategy`→`build_match_reason`（LLMを呼ばず条件と実測値から機械的に判定理由を組み立てる、決定的な処理）の順に実行し、結果テーブルは行クリックで銘柄詳細ダイアログ（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)）を開ける。選定銘柄が属する業種のネットワーク図（[4.5 セクターローテーション](#45-セクターローテーション)のネットワーク図と同じ`build_mermaid_lead_lag_graph`を再利用）も表示する。
 
@@ -947,33 +945,128 @@ sequenceDiagram
 
 - キャッシュキーは「当日日付＋呼び出し元が指定するキー文字列」で構成されるファイルパス（`data/cache/YYYY-MM-DD-<key>.txt`）。
 - 日付が変わると自動的にキャッシュミスになる（同日内のみ再利用）。
-- 利用箇所: ポートフォリオレビュー・ユニバースfundamentals・単一銘柄バックテスト解説（Step1・Step2の結果を結合した1つの文字列として保存、[4.3](#43-バックテスト単一銘柄)参照）・一括バックテストランキング・セクターローテーション分析結果（ネットワーク図データ含む）・ウェーブレット分析AI解説・銘柄詳細情報（詳細は [5.3](#53-データ永続化) の一覧表を参照）。**AI質問箱（[4.8](#48-ai質問箱)）とAI戦略ビルダーの対話・評価ループはこの層を使わない**（質問・対話のたびに毎回LLMを呼び出す）。
+- 利用箇所: ポートフォリオレビュー・単一銘柄バックテスト解説（Step1・Step2の結果を結合した1つの文字列として保存、[4.3](#43-バックテスト単一銘柄)参照）・一括バックテストランキング・セクターローテーション分析結果（ネットワーク図データ含む）・ウェーブレット分析AI解説・銘柄詳細情報（詳細は [5.3](#53-データ永続化) の一覧表を参照）。**AI質問箱（[4.8](#48-ai質問箱)）とAI戦略ビルダーの対話・評価ループはこの層を使わない**（質問・対話のたびに毎回LLMを呼び出す）。ユニバースfundamentalsは市場データDB化前はこの層を使っていたが、現在は `fundamentals_snapshots` テーブルのTTL方式read-throughに置き換わり、この層は使わない（[5.3](#53-データ永続化)参照）。
 - キー文字列は基本的にSHA256ハッシュの先頭12桁だが、**銘柄詳細情報のみ例外**で `stock-detail-<ticker>` という非ハッシュのキーを使う（銘柄単位で1エントリのため衝突の懸念がなく、ハッシュ化する意味が薄いため）。
 - 各タブ（およびウェーブレット分析セクションのAI解説）に「キャッシュを無視して再生成する」チェックボックスがあり、オンの場合は読み込みをスキップして必ず再計算する（書き込みは常に行われ、既存キャッシュを上書きする）。**銘柄詳細ダイアログのみこのチェックボックスが無く**、常に同日キャッシュがあれば再利用する。
-- AI戦略ビルダーで保存する`strategies.json`（[5.3](#53-データ永続化)参照）は、この日次ファイルキャッシュとは別物の**ユーザー入力データ**（明示的な「確定する」操作でのみ更新され、日付が変わっても消えない永続データ）である。
+- AI戦略ビルダーで保存する戦略（`strategies`テーブル、[5.3](#53-データ永続化)参照）は、この日次ファイルキャッシュとは別物の**ユーザー入力データ**（明示的な「確定する」操作でのみ更新され、日付が変わっても消えない永続データ）である。
 
 ### 5.3 データ永続化
 
-すべてローカルのファイルシステムに保存する（DB・KVSは使用しない）。DBは使わずファイルのみで完結させることで、個人利用のセットアップ負荷をゼロにしている。保存先はすべて `data/` 配下にまとまっており、**丸ごと `.gitignore` 対象**でGitには一切コミットされない。実行のたびにローカルで生成される「使い捨て」データという位置付け。
+ユーザー固有データと、全ユーザーで共有する市場データは **SQLite（`data/app.db`、SQLAlchemy ORM）** に永続化する（`db/models.py` がテーブル定義、`db/engine.py` がエンジン生成・スキーマ初期化を担う）。LLM呼び出し・API呼び出し結果の「使い捨て」データ（[5.2](#52-キャッシュ機構) (b)参照）は従来どおり `data/cache/` 配下の日次ファイルキャッシュのまま使う。保存先はすべて `data/` 配下にまとまっており、**丸ごと `.gitignore` 対象**でGitには一切コミットされない。
 
 ```
 data/
-  holdings.json                  # 保有銘柄（「ユーザー入力データ」）
-  sector_display_settings.json   # セクターローテーションタブの表示設定（同じくユーザー入力データ）
-  strategies.json                 # AI戦略ビルダーで確定・保存した戦略一覧（同じくユーザー入力データ）
+  app.db                          # SQLiteデータベース（ユーザー固有データ + 全ユーザー共有の市場データ）
   cache/                          # LLM呼び出し・API呼び出し結果の日次キャッシュ（すべて再生成可能）
     YYYY-MM-DD-<種別>-<hash または ticker>.txt
+  *.json.migrated                 # DB化前の永続化ファイル（移行済み・参照されない。下記「データ移行」参照）
 ```
 
-#### データ一覧
+#### ER図
+
+```mermaid
+erDiagram
+    users ||--o{ holdings : "保有"
+    users ||--o{ strategies : "保存"
+    users ||--|| sector_display_settings : "設定"
+
+    users {
+        int id PK
+        string username UK
+        string email UK "nullable"
+        string hashed_password "bcrypt"
+        string first_name "nullable"
+        string last_name "nullable"
+        bool is_admin
+        datetime created_at
+    }
+    holdings {
+        int id PK
+        int user_id FK
+        string ticker
+        float shares
+        float cost
+    }
+    strategies {
+        int id PK
+        int user_id FK
+        string strategy_name "UNIQUE(user_id, strategy_name)"
+        text strategy_json
+        datetime created_at
+    }
+    sector_display_settings {
+        int user_id PK "also FK -> users.id"
+        text visible_json
+        text order_json
+        text height_json
+    }
+    price_history {
+        int id PK
+        string ticker "UNIQUE(ticker, date)"
+        string date "UNIQUE(ticker, date)"
+        float open
+        float high
+        float low
+        float close
+        float volume
+    }
+    fundamentals_snapshots {
+        int id PK
+        string ticker "UNIQUE(ticker, snapshot_date)"
+        string snapshot_date "UNIQUE(ticker, snapshot_date)"
+        string name "nullable"
+        float trailing_pe "nullable"
+        float price_to_book "nullable"
+        float dividend_yield "nullable"
+        float market_cap "nullable"
+        float return_on_equity "nullable"
+        float revenue_growth "nullable"
+    }
+    company_profiles {
+        string ticker PK
+        string name "nullable"
+        datetime name_updated_at "nullable"
+        string sector "nullable"
+        string industry "nullable"
+        text business_summary "nullable"
+        datetime profile_updated_at "nullable"
+    }
+    ticker_news {
+        int id PK
+        string ticker "UNIQUE(ticker, link)"
+        string title "nullable"
+        string publisher "nullable"
+        string link "UNIQUE(ticker, link), nullable"
+        datetime fetched_at
+    }
+```
+
+`price_history`・`fundamentals_snapshots`・`company_profiles`・`ticker_news` の4テーブルは `ticker`（銘柄コード文字列）をキーに参照されるが、銘柄マスタテーブルは存在せず、`holdings.ticker` を含めどのテーブル間にも外部キー制約はない（すべて文字列一致でのみ対応付く）。
+
+#### テーブルの用途
+
+| テーブル                   | スコープ       | 用途・特記事項                                                                                                                                                                                                                                                                                          |
+| -------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                   | ユーザー       | 認証情報（`streamlit-authenticator` が要求する `username`/`email`/`hashed_password`）。`hashed_password` は `bcrypt`（移行スクリプトのハッシュと `streamlit-authenticator` のハッシュ方式を一致させている）。`first_name`/`last_name`/`is_admin` はいずれも後から追加した列で、`db/engine.py::init_db()` が `PRAGMA table_info` で既存列を確認し無ければ `ALTER TABLE` する軽量マイグレーションで既存DBへ自動追従する（Alembic等は不使用の方針）。管理者が1人もいなければ `MIN(id)` のユーザーへ自動的に `is_admin` を付与する。 |
+| `holdings`                | ユーザー       | 保有銘柄（`portfolio_management/storage.py`）。`save_holdings` は既存行を全削除してから渡された全件で置き換える方式。                                                                                                                                                                              |
+| `strategies`              | ユーザー       | AI戦略ビルダーで確定・保存した戦略（`strategy_builder/storage.py`）。`(user_id, strategy_name)` の複合UNIQUE制約により同名戦略は上書き。                                                                                                                                                          |
+| `sector_display_settings` | ユーザー       | セクターローテーションタブの表示設定（`sector_analysis/display_settings.py`）。`user_id` を主キー兼外部キーとする1ユーザー1行の構成。                                                                                                                                                              |
+| `price_history`           | 全ユーザー共有 | 日次OHLCV。`data_api/stock_price_api.py::fetch_price_history` が read-through方式で管理する：DB上のデータが鮮度切れの場合は常に `_MAX_FETCH_PERIOD="5y"`（アプリ内最大期間）分をyfinanceから取得してDBへ追記し、要求期間分をDBから組み立てて返す（期間ごとに異なる要求が来ても再フェッチ不要にする設計）。 |
+| `fundamentals_snapshots`  | 全ユーザー共有 | PER/PBR/配当利回り等の日次スナップショット。TTL方式（当日分があれば再利用）。                                                                                                                                                                                                                        |
+| `company_profiles`        | 全ユーザー共有 | 銘柄コードを主キーに、日本語名（`fetch_japanese_name`）と業種・事業概要（`fetch_company_profile`）を1テーブルに統合。取得元ごとに `name_updated_at`/`profile_updated_at` を独立管理し、それぞれ別のTTL（当日/30日）で更新判定する。                                                                |
+| `ticker_news`             | 全ユーザー共有 | ニュース見出し。毎回フェッチしてDBに追記したうえで、DB上位N件を返す（`link` があれば `(ticker, link)` でUNIQUE、`link` が無い記事は `(ticker, title, publisher)` でアプリ側dedup）。                                                                                                              |
+
+`fetch_universe_fundamentals`/`fetch_universe_price_histories`（スクリーニング・AI戦略ビルダーで使用）は、銘柄ごとの上記read-through関数を `common/concurrency.py::map_concurrently` で並行呼び出しするだけの薄い集約関数で、専用のファイルキャッシュは持たない（DB自体が恒久キャッシュとして機能するため）。
+
+#### データ移行
+
+DB化前は `holdings.json`/`sector_display_settings.json`/`strategies.json` にユーザー入力データを保存していた。`scripts/migrate_to_db.py`（一回限りの対話的CLI）が、これらのファイルを最初の登録ユーザーのデータとしてDBへ移行し、移行元ファイルは `.json.migrated` にリネームして残す（読み込みには使われない）。
+
+#### 日次ファイルキャッシュのデータ一覧（[5.2](#52-キャッシュ機構) (b)）
 
 | データ                         | 保存先                                                 | キー・形式                                                                                                                                                                                                                                                                                                       | 生成元                                                                                    |
 | ------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 保有銘柄                       | `data/holdings.json`                                 | `[{"ticker": str, "shares": int, "cost": float}, ...]`                                                                                                                                                                                                                                                         | ポートフォリオタブの「保存」ボタン（`storage.py`）                                      |
-| セクターローテーション表示設定 | `data/sector_display_settings.json`                  | JSON文字列`{"visible": {...}, "order": {...}, "height": {...}}`（セクションキーごとのbool/int/int）                                                                                                                                                                                                            | セクターローテーションタブ「表示設定」expander（`sector_analysis/display_settings.py`） |
-| 保存済み戦略                   | `data/strategies.json`                               | `[{"strategy_name", "conditions", "sort_by", "order"}, ...]`。同名戦略は上書き                                                                                                                                                                                                                                 | AI戦略ビルダータブ「この条件で確定する」（`strategy_builder/storage.py`）               |
 | ポートフォリオレビュー結果     | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁                                                                                                                                                                             | ポートフォリオタブ「レビューを生成」                                                      |
-| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                                                                                                                                                                                               | スクリーニングタブ（絞り込み実行時）                                                      |
 | 単一銘柄バックテスト解説       | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文＋改善提案（プレーンテキスト、Prompt Chaining Step1・Step2を結合した1つの文字列）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁                                                                                                                                                                    | バックテストタブ「バックテストを実行」                                                    |
 | 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments"}`。`ranking_rows`の各行は銘柄ごとに探索された`best_params`・`stability_cv`・`is_stable`を含む。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                                                                                        | 一括バックテストタブ「一括バックテストを実行」                                            |
 | セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt`   | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments", "sector_returns", "network_pairs"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁。`sector_returns`は業種別日次リターン系列（ウェーブレット分析の再計算元）、`network_pairs`は全ペア×周期帯の支配的ラグ集約（ネットワーク図の描画元） | セクターローテーションタブ「分析を実行」                                                  |
@@ -982,14 +1075,14 @@ data/
 
 #### 保管方式のポイント（`common/cache.py`）
 
-- ファイル名は `data/cache/<今日の日付>-<呼び出し元指定のキー>.txt` という規則で、パスそのものが「キャッシュキー」を兼ねる単純な仕組み（DB不要）。
+- ファイル名は `data/cache/<今日の日付>-<呼び出し元指定のキー>.txt` という規則で、パスそのものが「キャッシュキー」を兼ねる単純な仕組み（このキャッシュ層自体はDBを使わない）。
 - **日付がファイル名の一部**のため、日をまたぐと自動的にキャッシュミス扱いになり再生成される（同日内のみ再利用、TTL管理などは行わない）。
 - 各タブの「キャッシュを無視して再生成する」チェックボックスをオンにすると読み込みをスキップし、常に再計算のうえ同名ファイルを上書きする（銘柄詳細ダイアログを除く）。
-- `holdings.json` の読み込み失敗（ファイル無し・JSON破損・リスト以外の型）時は空リストにフォールバックし、キャッシュファイルの旧形式（JSONDecodeError、または銘柄詳細情報の場合はOHLCV拡張前の `price_history` 形式）もキャッシュミスとして扱われ再生成される。
+- キャッシュファイルの旧形式（JSONDecodeError、または銘柄詳細情報の場合はOHLCV拡張前の `price_history` 形式）はキャッシュミスとして扱われ再生成される。`load_holdings`（DB read）は該当ユーザーの行が1件も無ければ空リストを返す。
 
 #### 外部送信について
 
-- 保有銘柄・キャッシュデータはローカルファイルに留まり、外部サーバーへの送信は行わない。
+- ユーザー固有データ・市場データ（`data/app.db`）およびキャッシュデータ（`data/cache/`）はローカルに留まり、外部サーバーへの送信は行わない。
 - 例外は **LLM呼び出し時**で、事実データ（構成比・リスク指標・株価・ニュース見出しなど）がプロンプトの一部としてClaude Code CLI経由でAnthropicへ送信される。これは各機能のシーケンス図中の `call_llm` 呼び出しに該当する。
 
 ### 5.4 免責事項の扱い
@@ -1005,7 +1098,7 @@ data/
 | LLMサブプロセスの非0終了                                                                            | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                                                                           |
 | LLM応答のJSONパース失敗（スクリーニング条件）                                                       | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない                                                                                                  |
 | LLM応答のJSONパース失敗（各種コメント・センチメント）                                               | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続                                                                                        |
-| `holdings.json` 破損・読み込み失敗                                                                | 空リストにフォールバック                                                                                                                                      |
+| 対象ユーザーの保有銘柄が0件（`load_holdings`）                                                     | 空リストを返す                                                                                                                                                |
 | 個別銘柄の株価データ取得失敗（ポートフォリオ）                                                      | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続                                                  |
 | 個別銘柄のfundamentals取得失敗（スクリーニング）                                                    | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続                                                                                      |
 | 個別銘柄の株価データ取得失敗（一括バックテスト）                                                    | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                                                                                                    |
@@ -1034,6 +1127,5 @@ data/
 
 - MCPサーバー経由でのデータ取得への置き換え
 - レポートのメール/Slack自動送信
-- 複数ユーザー対応・認証
 - UNIVERSE（日経225構成銘柄、現在228銘柄）の定期的な見直し・入れ替え反映（`screening/universe.py` に実装時点＝2026年7月時点のスナップショットである旨のコメントあり。日経225の定期見直し・臨時入れ替えに追従する仕組みは未実装で、公式発表との定期照合が手作業前提。銘柄追加時は `screening/sectors.py::SECTOR_MAP` の追随更新も手作業）
-- データベース対応（現状は `common/cache.py` による日付キー付きファイルキャッシュと `strategies.json` などのフラットファイルでの永続化のみで、RDBMS/NoSQLは未導入。データ量増加や複数プロセスからの同時アクセス、履歴の構造化クエリが必要になった場合はSQLite等への移行を検討）
+- 管理者機能のフェーズC（市場データ管理: `price_history`/`fundamentals_snapshots`/`company_profiles` を対象に、銘柄コード検索→`st.data_editor`で一覧編集・削除するCRUD画面）は未着手。複数ユーザー対応・認証（`streamlit-authenticator`）・DB化（SQLite+SQLAlchemy、[5.3](#53-データ永続化)参照）・管理者タブのフェーズA/B（戦略管理・ユーザー管理）は実装済み
