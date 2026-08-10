@@ -957,3 +957,40 @@ def test_save_fundamentals_snapshots_for_ticker_creates_company_profile_stub_for
 
     with session_factory() as session:
         assert session.get(stock_price_api.CompanyProfile, "9999.T") is not None
+
+
+def test_load_all_company_profiles_returns_rows_ordered_by_ticker(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="ZZZZ.T", name="Z社", sector_jp="小売"))
+        session.add(stock_price_api.CompanyProfile(ticker="AAAA.T", name="A社", sector_jp="銀行"))
+        session.commit()
+
+    profiles = stock_price_api.load_all_company_profiles(session_factory=session_factory)
+    tickers = [p["ticker"] for p in profiles]
+    assert tickers.index("AAAA.T") < tickers.index("ZZZZ.T")
+    aaaa = next(p for p in profiles if p["ticker"] == "AAAA.T")
+    assert aaaa["name"] == "A社"
+    assert aaaa["sector_jp"] == "銀行"
+
+
+def test_save_company_profile_fields_stores_sector_jp(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_company_profile_fields(
+        "TEST1.T",
+        "テスト株式会社",
+        "Technology",
+        "Software",
+        "概要",
+        sector_jp="情報通信・サービスその他",
+        session_factory=session_factory,
+    )
+
+    profile = stock_price_api.load_company_profile("TEST1.T", session_factory=session_factory)
+    assert profile["sector_jp"] == "情報通信・サービスその他"

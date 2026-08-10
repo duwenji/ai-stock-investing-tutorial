@@ -216,6 +216,7 @@ def _render_market_data_management() -> None:
         name = st.text_input("日本語銘柄名", value=profile.get("name") or "")
         sector = st.text_input("業種", value=profile.get("sector") or "")
         industry = st.text_input("詳細業種", value=profile.get("industry") or "")
+        sector_jp = st.text_input("東証17業種区分", value=profile.get("sector_jp") or "")
         business_summary = st.text_area(
             "事業内容", value=profile.get("business_summary") or "", height=150
         )
@@ -226,6 +227,7 @@ def _render_market_data_management() -> None:
                 sector or None,
                 industry or None,
                 business_summary or None,
+                sector_jp or None,
             )
             st.success("企業プロファイルを保存しました。")
             st.rerun()

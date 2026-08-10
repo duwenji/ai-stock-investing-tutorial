@@ -581,8 +581,27 @@ def load_company_profile(ticker: str, session_factory=SessionLocal) -> dict | No
             "name": row.name,
             "sector": row.sector,
             "industry": row.industry,
+            "sector_jp": row.sector_jp,
             "business_summary": row.business_summary,
         }
+
+
+def load_all_company_profiles(session_factory=SessionLocal) -> list[dict]:
+    """company_profilesの全行をticker順で返す（UNIVERSE/UNIVERSE_NAMES/SECTOR_MAP
+    廃止に伴い、アプリが分析対象とする銘柄一覧の単一の情報源として使う）。"""
+    with session_factory() as session:
+        rows = session.query(CompanyProfile).order_by(CompanyProfile.ticker).all()
+        return [
+            {
+                "ticker": row.ticker,
+                "name": row.name,
+                "sector_jp": row.sector_jp,
+                "sector": row.sector,
+                "industry": row.industry,
+                "business_summary": row.business_summary,
+            }
+            for row in rows
+        ]
 
 
 def save_company_profile_fields(
@@ -591,6 +610,7 @@ def save_company_profile_fields(
     sector: str | None,
     industry: str | None,
     business_summary: str | None,
+    sector_jp: str | None = None,
     session_factory=SessionLocal,
 ) -> None:
     """指定銘柄の企業プロファイルを直接UPDATEする（管理者向け）。行が無ければ
@@ -604,4 +624,5 @@ def save_company_profile_fields(
         row.sector = sector
         row.industry = industry
         row.business_summary = business_summary
+        row.sector_jp = sector_jp
         session.commit()
