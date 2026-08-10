@@ -115,6 +115,9 @@ def test_main_exits_zero_when_all_succeed(monkeypatch, session_factory):
         "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
     )
     monkeypatch.setattr("scripts.update_market_data.init_db", lambda engine: None)
+    # main()はsetup_logging()を呼ぶが、本物を使うと実際のapp/logs/を
+    # 汚してしまうため、テストでは無効化する。
+    monkeypatch.setattr("scripts.update_market_data.setup_logging", lambda **kwargs: None)
 
     with pytest.raises(SystemExit) as exc_info:
         main()
@@ -139,6 +142,9 @@ def test_main_exits_one_when_any_ticker_fails(monkeypatch, session_factory):
         "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
     )
     monkeypatch.setattr("scripts.update_market_data.init_db", lambda engine: None)
+    # main()はsetup_logging()を呼ぶが、本物を使うと実際のapp/logs/を
+    # 汚してしまうため、テストでは無効化する。
+    monkeypatch.setattr("scripts.update_market_data.setup_logging", lambda **kwargs: None)
 
     with pytest.raises(SystemExit) as exc_info:
         main()
