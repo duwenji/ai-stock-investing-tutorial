@@ -8,6 +8,7 @@ from portfolio_management.backtest import (
     generate_backtest_explanation,
     run_backtest_comparison,
     run_bollinger_reversal_backtest,
+    run_grid_search,
     run_ma_crossover_backtest,
     run_macd_crossover_backtest,
     run_rsi_reversal_backtest,
@@ -399,5 +400,87 @@ def test_run_universe_backtest_ranking_logs_duration(caplog):
         )
 
     assert "ユニバース一括バックテスト" in caplog.text
+    assert "を開始" in caplog.text
+    assert "が完了しました" in caplog.text
+
+
+def test_run_grid_search_returns_result_for_each_combination_in_cartesian_product():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+
+    grid_results = run_grid_search(
+        prices,
+        run_ma_crossover_backtest,
+        param_grid={"short_window": [1], "long_window": [2, 3]},
+    )
+
+    assert len(grid_results) == 2
+    assert {row["params"]["long_window"] for row in grid_results} == {2, 3}
+    assert all(row["params"]["short_window"] == 1 for row in grid_results)
+
+
+def test_run_grid_search_computes_risk_adjusted_return_per_combination():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    prices = pd.Series([100, 100, 102, 102], index=dates)
+
+    grid_results = run_grid_search(
+        prices,
+        run_ma_crossover_backtest,
+        param_grid={"short_window": [1], "long_window": [2]},
+    )
+
+    assert grid_results == [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
+
+
+def test_run_grid_search_applies_fixed_params_to_every_combination():
+    dates = pd.date_range("2026-01-01", periods=9, freq="D")
+    prices = pd.Series([100, 90, 80, 70, 90, 110, 130, 130, 130], index=dates)
+    captured_kwargs = []
+
+    def fake_backtest_func(prices, transaction_cost_pct=0.0, **params):
+        captured_kwargs.append(params)
+        return {
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 0.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 0,
+        }
+
+    run_grid_search(
+        prices,
+        fake_backtest_func,
+        param_grid={"period": [3, 5]},
+        fixed_params={"oversold": 30, "overbought": 70},
+    )
+
+    assert captured_kwargs == [
+        {"period": 3, "oversold": 30, "overbought": 70},
+        {"period": 5, "oversold": 30, "overbought": 70},
+    ]
+
+
+def test_run_grid_search_logs_duration(caplog):
+    dates = pd.date_range("2026-01-01", periods=80, freq="D")
+    prices = pd.Series(range(100, 180), index=dates, dtype=float)
+
+    with caplog.at_level(logging.INFO, logger="portfolio_management.backtest"):
+        run_grid_search(
+            prices,
+            run_ma_crossover_backtest,
+            param_grid={"short_window": [5], "long_window": [25]},
+        )
+
+    assert "グリッドサーチ計算" in caplog.text
     assert "を開始" in caplog.text
     assert "が完了しました" in caplog.text

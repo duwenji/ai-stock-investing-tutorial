@@ -3,6 +3,7 @@
 解説文を生成するモジュール。"""
 
 import logging
+from itertools import product
 
 import pandas as pd
 
@@ -48,6 +49,42 @@ def _finalize_backtest(prices: pd.Series, position: pd.Series, transaction_cost_
         "max_drawdown_pct": round(max_drawdown * 100, 2),
         "trade_days": int(len(trade_days)),
     }
+
+
+def _risk_adjusted_return(result: dict) -> float:
+    """収益率をリスク（最大ドローダウン）で調整した値を返す。
+    ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま返す。"""
+    drawdown = abs(result["max_drawdown_pct"])
+    risk_adjusted = result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
+    return round(risk_adjusted, 2)
+
+
+def _run_grid_combinations(
+    prices: pd.Series,
+    backtest_func,
+    keys: list[str],
+    combos: list[tuple],
+    fixed_params: dict,
+    transaction_cost_pct: float,
+) -> list[dict]:
+    """param_gridの組み合わせ（あらかじめ計算済みのデカルト積）ごとにバックテストを
+    実行する内部処理。ログ出力は呼び出し元（run_grid_search / run_universe_backtest_ranking）
+    の責務とし、この関数自体はログを出さない（一括バックテストで銘柄数だけ呼ばれても
+    ログが大量出力されないようにするため）。"""
+    grid_results = []
+    for combo in combos:
+        params = dict(zip(keys, combo))
+        result = backtest_func(
+            prices, transaction_cost_pct=transaction_cost_pct, **params, **fixed_params
+        )
+        grid_results.append(
+            {
+                "params": params,
+                **result,
+                "risk_adjusted_return": _risk_adjusted_return(result),
+            }
+        )
+    return grid_results
 
 
 def run_ma_crossover_backtest(
@@ -153,6 +190,24 @@ def run_bollinger_reversal_backtest(
     position = held_position.shift(1).fillna(0)
 
     return _finalize_backtest(prices, position, transaction_cost_pct)
+
+
+def run_grid_search(
+    prices: pd.Series,
+    backtest_func,
+    param_grid: dict,
+    fixed_params: dict | None = None,
+    transaction_cost_pct: float = 0.0,
+) -> list[dict]:
+    """param_gridの全組み合わせ（デカルト積）でバックテストを実行し、
+    組み合わせごとのパラメータ・成績・リスク調整済みリターンをまとめて返す。"""
+    fixed_params = fixed_params or {}
+    keys = list(param_grid.keys())
+    combos = list(product(*(list(param_grid[key]) for key in keys)))
+    with log_duration(logger, f"グリッドサーチ計算（{len(combos)}通り）"):
+        return _run_grid_combinations(
+            prices, backtest_func, keys, combos, fixed_params, transaction_cost_pct
+        )
 
 
 # 画面（UI）に表示する戦略の一覧。各戦略の実行関数・プリセットパラメータ・
