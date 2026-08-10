@@ -12,11 +12,11 @@ from common.concurrency import map_concurrently
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm
+from data_api.stock_price_api import load_all_company_profiles
 from portfolio_management.backtest import STRATEGIES, run_universe_backtest_ranking
 from portfolio_management.storage import load_holdings
 from portfolio_management.ticker_names import build_candidate_names
 from prompt_patterns.backtest_explanation import generate_ranking_comments
-from screening.universe import UNIVERSE
 
 from app_tabs.shared import (
     CACHE_DIR,
@@ -55,10 +55,11 @@ def render_ranking_tab() -> None:
         strategy = STRATEGIES[ranking_strategy]
         transaction_cost_pct = 0.1 if ranking_apply_cost else 0.0
 
-        # 分析対象はユニバース銘柄と保有銘柄の和集合とする
+        # 分析対象はcompany_profilesの全銘柄と保有銘柄の和集合とする
         holdings = load_holdings(get_current_user_id())
         holdings_tickers = [h["ticker"] for h in holdings if h.get("ticker")]
-        target_tickers = sorted(set(UNIVERSE) | set(holdings_tickers))
+        all_tickers = [p["ticker"] for p in load_all_company_profiles()]
+        target_tickers = sorted(set(all_tickers) | set(holdings_tickers))
 
         # 戦略・期間・コスト・対象銘柄集合が同一なら結果をキャッシュから再利用する
         cache_key = "universe-backtest-" + hashlib.sha256(
