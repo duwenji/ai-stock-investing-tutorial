@@ -180,44 +180,61 @@ def test_run_backtest_comparison_returns_result_per_preset_label():
 
 
 def test_generate_backtest_explanation_includes_disclaimer_and_commentary():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     fake_call_llm = lambda prompt: "テスト用のバックテスト解説です。"
 
-    result = generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    result = generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert result.count(DISCLAIMER_NOTICE) == 2
     assert "テスト用のバックテスト解説です。" in result
 
 
 def test_generate_backtest_explanation_passes_ticker_and_comparison_to_prompt():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     captured_prompts = []
 
     def fake_call_llm(prompt):
         captured_prompts.append(prompt)
         return "解説"
 
-    generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert "AAA.T" in captured_prompts[0]
-    assert '"A"' in captured_prompts[0]
+    assert "short_window=1" in captured_prompts[0]
 
 
-def test_generate_backtest_explanation_passes_strategy_name_and_func_to_prompt():
-    dates = pd.date_range("2026-01-01", periods=9, freq="D")
-    prices = pd.Series([100, 90, 80, 70, 90, 110, 130, 130, 130], index=dates)
+def test_generate_backtest_explanation_passes_strategy_name_to_prompt():
+    grid_results = [
+        {
+            "params": {"period": 3, "oversold": 30},
+            "total_return_pct": 22.22,
+            "benchmark_return_pct": 30.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 22.22,
+        }
+    ]
     captured_prompts = []
 
     def fake_call_llm(prompt):
@@ -225,30 +242,57 @@ def test_generate_backtest_explanation_passes_strategy_name_and_func_to_prompt()
         return "解説"
 
     generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        backtest_func=run_rsi_reversal_backtest,
-        strategy_name="RSI逆張り",
-        presets=[("A", {"period": 3, "oversold": 30, "overbought": 70})],
-        call_llm=fake_call_llm,
+        "AAA.T", grid_results, strategy_name="RSI逆張り", call_llm=fake_call_llm
     )
 
     assert "RSI逆張り戦略" in captured_prompts[0]
 
 
-def test_generate_backtest_explanation_uses_default_ma_strategy_when_presets_omitted():
-    dates = pd.date_range("2026-01-01", periods=80, freq="D")
-    prices = pd.Series([100.0] * 80, index=dates)
-    fake_call_llm = lambda prompt: "解説"
+def test_generate_backtest_explanation_passes_stability_info_to_prompt():
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        },
+        {
+            "params": {"short_window": 1, "long_window": 3},
+            "total_return_pct": 5.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 5.0,
+        },
+    ]
+    captured_prompts = []
 
-    result = generate_backtest_explanation("AAA.T", prices, call_llm=fake_call_llm)
+    def fake_call_llm(prompt):
+        captured_prompts.append(prompt)
+        return "解説"
 
-    assert "解説" in result
+    generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
+
+    assert "is_stable" in captured_prompts[0]
+    assert "grid_size" in captured_prompts[0]
 
 
 def test_generate_backtest_explanation_calls_llm_twice_and_includes_improvement_section():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     responses = iter(["結果の解説です。", "追加提案です。"])
     call_count = {"n": 0}
 
@@ -256,12 +300,7 @@ def test_generate_backtest_explanation_calls_llm_twice_and_includes_improvement_
         call_count["n"] += 1
         return next(responses)
 
-    result = generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    result = generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert call_count["n"] == 2
     assert "結果の解説です。" in result
@@ -270,8 +309,17 @@ def test_generate_backtest_explanation_calls_llm_twice_and_includes_improvement_
 
 
 def test_generate_backtest_explanation_second_prompt_includes_first_explanation():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     captured_prompts = []
     responses = iter(["最初の解説文です。", "改善提案文です。"])
 
@@ -279,51 +327,54 @@ def test_generate_backtest_explanation_second_prompt_includes_first_explanation(
         captured_prompts.append(prompt)
         return next(responses)
 
-    generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert "最初の解説文です。" in captured_prompts[1]
     assert "AAA.T" in captured_prompts[1]
 
 
 def test_generate_backtest_explanation_gate_skips_second_call_when_explanation_empty():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     call_count = {"n": 0}
 
     def fake_call_llm(prompt):
         call_count["n"] += 1
         return "   "
 
-    result = generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    result = generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert call_count["n"] == 1
     assert result == "解説の生成に失敗しました。"
 
 
 def test_generate_backtest_explanation_omits_improvement_section_when_step2_empty():
-    dates = pd.date_range("2026-01-01", periods=4, freq="D")
-    prices = pd.Series([100, 100, 102, 102], index=dates)
+    grid_results = [
+        {
+            "params": {"short_window": 1, "long_window": 2},
+            "total_return_pct": 0.0,
+            "benchmark_return_pct": 2.0,
+            "win_rate_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trade_days": 1,
+            "risk_adjusted_return": 0.0,
+        }
+    ]
     responses = iter(["結果の解説です。", "  "])
 
     def fake_call_llm(prompt):
         return next(responses)
 
-    result = generate_backtest_explanation(
-        "AAA.T",
-        prices,
-        presets=[("A", {"short_window": 1, "long_window": 2})],
-        call_llm=fake_call_llm,
-    )
+    result = generate_backtest_explanation("AAA.T", grid_results, call_llm=fake_call_llm)
 
     assert "結果の解説です。" in result
     assert "## 追加で検討したい観点" not in result

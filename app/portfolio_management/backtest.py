@@ -290,16 +290,17 @@ def run_backtest_comparison(
         }
 
 
+def _format_params(params: dict) -> str:
+    return ", ".join(f"{key}={value}" for key, value in params.items())
+
+
 def generate_backtest_explanation(
     ticker: str,
-    prices: pd.Series,
-    backtest_func=run_ma_crossover_backtest,
+    grid_results: list[dict],
     strategy_name: str = "移動平均クロスオーバー",
-    presets: list[tuple[str, dict]] | None = None,
-    transaction_cost_pct: float = 0.0,
     call_llm=default_call_llm,
 ) -> str:
-    """バックテスト結果をLLMに渡し、投資家向けの解説レポート（Markdown）を
+    """グリッドサーチ結果をLLMに渡し、投資家向けの解説レポート（Markdown）を
     生成する。免責事項を先頭と末尾に必ず付与する。
 
     Prompt Chaining: Step1で結果解説を生成し、その出力をgate（空文字チェック）
@@ -307,13 +308,26 @@ def generate_backtest_explanation(
     Step1が空文字の場合はStep2に進まずエラーメッセージを返す。Step2が
     空文字の場合は改善提案セクションを省略し、Step1の結果のみ返す。
     """
-    if presets is None:
-        presets = STRATEGIES[strategy_name]["presets"]
-
-    comparison = run_backtest_comparison(prices, backtest_func, presets, transaction_cost_pct)
+    summary = summarize_grid_stability(grid_results)
+    best, worst = summary["best"], summary["worst"]
+    comparison = {
+        f"最良（{_format_params(best['params'])}）": {
+            key: value for key, value in best.items() if key != "params"
+        },
+        f"近傍最悪（{_format_params(worst['params'])}）": {
+            key: value for key, value in worst.items() if key != "params"
+        },
+    }
+    stability = {
+        "cv": summary["cv"],
+        "is_stable": summary["is_stable"],
+        "grid_size": summary["grid_size"],
+    }
 
     # Step1: 結果解説
-    explanation = call_llm(build_backtest_prompt(ticker, comparison, strategy_name)).strip()
+    explanation = call_llm(
+        build_backtest_prompt(ticker, comparison, stability, strategy_name)
+    ).strip()
     if not explanation:
         return "解説の生成に失敗しました。"
 
@@ -326,7 +340,9 @@ def generate_backtest_explanation(
     ]
 
     # Step2: 改善提案（Step1の解説を入力として渡す）
-    improvement_prompt = build_improvement_prompt(ticker, comparison, explanation, strategy_name)
+    improvement_prompt = build_improvement_prompt(
+        ticker, comparison, explanation, stability, strategy_name
+    )
     improvement = call_llm(improvement_prompt).strip()
     if improvement:
         sections += [
