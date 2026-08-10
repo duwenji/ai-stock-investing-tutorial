@@ -2,11 +2,23 @@
 # LLMに総合コメントを生成させるためのプロンプトを組み立てるモジュール。
 
 
+def _format_news_lines(news: list[dict]) -> str:
+    # 見出しに続けて要約（あれば）を1行付記する。要約が無い記事は見出しのみ。
+    # ニュースが無い場合でもプロンプトの体裁が崩れないよう、代替文言を用意する。
+    lines = []
+    for item in news:
+        line = f"- {item.get('title')}"
+        summary = item.get("summary")
+        if summary:
+            line += f"\n  要約: {summary}"
+        lines.append(line)
+    return "\n".join(lines) or "- (ニュースなし)"
+
+
 def build_stock_detail_prompt(
     ticker: str, name: str | None, fundamentals: dict, technical: dict, news: list[dict]
 ) -> str:
-    # ニュースが無い場合でもプロンプトの体裁が崩れないよう、代替文言を用意する。
-    news_titles = "\n".join(f"- {item.get('title')}" for item in news) or "- (ニュースなし)"
+    news_lines = _format_news_lines(news)
     label = f"{ticker}（{name}）" if name else ticker
     # ファンダメンタルズ・テクニカル・ニュースの3系統の情報を1つのプロンプトにまとめ、
     # LLMが横断的に総合判断できるようにする。
@@ -23,7 +35,7 @@ def build_stock_detail_prompt(
         f"ATR(14日、値動きの大きさ、値幅%): {technical.get('atr_pct')}%"
         f"（{technical.get('atr_signal') or '不明'}）\n"
         f"OBV(出来高、値動きの裏付け): {technical.get('obv_signal') or '不明'}\n"
-        f"直近ニュース見出し:\n{news_titles}\n"
+        f"直近ニュース見出し:\n{news_lines}\n"
     )
 
 

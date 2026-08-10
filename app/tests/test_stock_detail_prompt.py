@@ -28,6 +28,18 @@ def test_build_stock_detail_prompt_shows_placeholder_when_no_news():
     assert "(ニュースなし)" in prompt
 
 
+def test_build_stock_detail_prompt_includes_news_summary_when_present():
+    news = [{"title": "好決算を発表", "publisher": "日経", "summary": "Sales grew 20%."}]
+    prompt = build_stock_detail_prompt("AAA.T", "エーエー株式会社", {}, {}, news)
+    assert "要約: Sales grew 20%." in prompt
+
+
+def test_build_stock_detail_prompt_omits_summary_line_when_absent():
+    news = [{"title": "好決算を発表", "publisher": "日経"}]
+    prompt = build_stock_detail_prompt("AAA.T", "エーエー株式会社", {}, {}, news)
+    assert "要約:" not in prompt
+
+
 def test_build_stock_detail_prompt_instructs_no_directive_language():
     prompt = build_stock_detail_prompt("AAA.T", "エーエー株式会社", {}, {}, [])
     assert "断定的な売買判断" in prompt
