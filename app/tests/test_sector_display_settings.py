@@ -1,19 +1,104 @@
 import json
 
+import pytest
+from sqlalchemy.orm import sessionmaker
+
+from db.engine import create_db_engine, init_db
 from sector_analysis.display_settings import (
     DEFAULT_SECTOR_DISPLAY_SETTINGS,
+    _normalize,
     load_sector_display_settings,
     save_sector_display_settings,
 )
 
 
-def test_load_missing_file_returns_defaults(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    assert load_sector_display_settings(path) == DEFAULT_SECTOR_DISPLAY_SETTINGS
+def test_normalize_none_returns_defaults():
+    assert _normalize(None) == DEFAULT_SECTOR_DISPLAY_SETTINGS
 
 
-def test_save_then_load_roundtrip(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
+def test_normalize_non_dict_returns_defaults():
+    assert _normalize([1, 2, 3]) == DEFAULT_SECTOR_DISPLAY_SETTINGS
+
+
+def test_normalize_legacy_flat_format_becomes_visible():
+    data = {
+        "heatmap": False,
+        "pairs_table": False,
+        "ai_comments": False,
+        "network_diagram": True,
+        "wavelet_analysis": False,
+    }
+    result = _normalize(data)
+    assert result["visible"] == data
+    assert result["order"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]
+    assert result["height"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]
+
+
+def test_normalize_missing_keys_filled_with_defaults():
+    data = {"visible": {"heatmap": False}, "order": {}, "height": {}}
+    result = _normalize(data)
+    assert result["visible"]["heatmap"] is False
+    assert result["visible"]["pairs_table"] is True
+    assert result["order"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]
+    assert result["height"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]
+
+
+def test_normalize_unknown_keys_are_dropped():
+    data = {
+        "visible": {"heatmap": False, "some_future_key": True},
+        "order": {},
+        "height": {},
+    }
+    result = _normalize(data)
+    assert "some_future_key" not in result["visible"]
+    assert result["visible"]["heatmap"] is False
+
+
+def test_normalize_non_bool_visible_value_falls_back_to_default():
+    data = {"visible": {"heatmap": "yes"}, "order": {}, "height": {}}
+    result = _normalize(data)
+    assert result["visible"]["heatmap"] is True
+
+
+def test_normalize_non_int_order_value_falls_back_to_default():
+    data = {"visible": {}, "order": {"heatmap": "first"}, "height": {}}
+    result = _normalize(data)
+    assert result["order"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]["heatmap"]
+
+
+def test_normalize_bool_order_value_falls_back_to_default():
+    # boolはPythonではintのサブクラスなので、明示的に弾かれることを確認する
+    data = {"visible": {}, "order": {"heatmap": True}, "height": {}}
+    result = _normalize(data)
+    assert result["order"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]["heatmap"]
+
+
+def test_normalize_non_numeric_height_value_falls_back_to_default():
+    data = {"visible": {}, "order": {}, "height": {"heatmap": "big"}}
+    result = _normalize(data)
+    assert result["height"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]["heatmap"]
+
+
+def test_normalize_unknown_height_key_is_dropped():
+    data = {"visible": {}, "order": {}, "height": {"pairs_table": 999}}
+    result = _normalize(data)
+    assert "pairs_table" not in result["height"]
+
+
+@pytest.fixture
+def session_factory(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    return sessionmaker(bind=engine)
+
+
+def test_load_returns_defaults_when_no_row(session_factory):
+    assert load_sector_display_settings(1, session_factory=session_factory) == (
+        DEFAULT_SECTOR_DISPLAY_SETTINGS
+    )
+
+
+def test_save_then_load_roundtrip(session_factory):
     settings = {
         "visible": {
             "heatmap": False,
@@ -31,124 +116,33 @@ def test_save_then_load_roundtrip(tmp_path):
         },
         "height": {"heatmap": 600, "network_diagram": 350, "wavelet_analysis": 450},
     }
-    save_sector_display_settings(path, settings)
-    assert load_sector_display_settings(path) == settings
+    save_sector_display_settings(1, settings, session_factory=session_factory)
+    assert load_sector_display_settings(1, session_factory=session_factory) == settings
 
 
-def test_load_corrupted_file_returns_defaults(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text("{not valid json", encoding="utf-8")
-    assert load_sector_display_settings(path) == DEFAULT_SECTOR_DISPLAY_SETTINGS
-
-
-def test_load_non_dict_json_returns_defaults(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text("[1, 2, 3]", encoding="utf-8")
-    assert load_sector_display_settings(path) == DEFAULT_SECTOR_DISPLAY_SETTINGS
-
-
-def test_load_legacy_flat_format_becomes_visible(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "heatmap": False,
-                "pairs_table": False,
-                "ai_comments": False,
-                "network_diagram": True,
-                "wavelet_analysis": False,
-            }
-        ),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert result["visible"] == {
-        "heatmap": False,
-        "pairs_table": False,
-        "ai_comments": False,
-        "network_diagram": True,
-        "wavelet_analysis": False,
+def test_save_overwrites_existing_settings(session_factory):
+    settings_a = {
+        "visible": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["visible"]),
+        "order": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]),
+        "height": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]),
     }
-    assert result["order"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]
-    assert result["height"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]
+    settings_b = json.loads(json.dumps(settings_a))
+    settings_b["visible"]["heatmap"] = False
 
-
-def test_load_missing_keys_filled_with_defaults(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {"heatmap": False}, "order": {}, "height": {}}),
-        encoding="utf-8",
+    save_sector_display_settings(1, settings_a, session_factory=session_factory)
+    save_sector_display_settings(1, settings_b, session_factory=session_factory)
+    assert load_sector_display_settings(1, session_factory=session_factory)["visible"]["heatmap"] is (
+        False
     )
-    result = load_sector_display_settings(path)
-    assert result["visible"]["heatmap"] is False
-    assert result["visible"]["pairs_table"] is True
-    assert result["order"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]
-    assert result["height"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]
 
 
-def test_load_unknown_keys_are_dropped(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "visible": {"heatmap": False, "some_future_key": True},
-                "order": {},
-                "height": {},
-            }
-        ),
-        encoding="utf-8",
+def test_settings_are_scoped_per_user(session_factory):
+    settings_1 = {
+        "visible": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["visible"]),
+        "order": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]),
+        "height": dict(DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]),
+    }
+    save_sector_display_settings(1, settings_1, session_factory=session_factory)
+    assert load_sector_display_settings(2, session_factory=session_factory) == (
+        DEFAULT_SECTOR_DISPLAY_SETTINGS
     )
-    result = load_sector_display_settings(path)
-    assert "some_future_key" not in result["visible"]
-    assert result["visible"]["heatmap"] is False
-
-
-def test_load_non_bool_visible_value_falls_back_to_default(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {"heatmap": "yes"}, "order": {}, "height": {}}),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert result["visible"]["heatmap"] is True
-
-
-def test_load_non_int_order_value_falls_back_to_default(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {}, "order": {"heatmap": "first"}, "height": {}}),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert result["order"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]["heatmap"]
-
-
-def test_load_bool_order_value_falls_back_to_default(tmp_path):
-    # bool は Python では int のサブクラスなので、明示的に弾かれることを確認する
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {}, "order": {"heatmap": True}, "height": {}}),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert result["order"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["order"]["heatmap"]
-
-
-def test_load_non_numeric_height_value_falls_back_to_default(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {}, "order": {}, "height": {"heatmap": "big"}}),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert result["height"]["heatmap"] == DEFAULT_SECTOR_DISPLAY_SETTINGS["height"]["heatmap"]
-
-
-def test_load_unknown_height_key_is_dropped(tmp_path):
-    path = tmp_path / "sector_display_settings.json"
-    path.write_text(
-        json.dumps({"visible": {}, "order": {}, "height": {"pairs_table": 999}}),
-        encoding="utf-8",
-    )
-    result = load_sector_display_settings(path)
-    assert "pairs_table" not in result["height"]
