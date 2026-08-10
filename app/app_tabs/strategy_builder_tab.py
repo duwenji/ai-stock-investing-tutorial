@@ -13,10 +13,9 @@ from data_api.llm_client import call_llm
 from data_api.stock_price_api import (
     fetch_universe_fundamentals,
     fetch_universe_price_histories,
+    load_all_company_profiles,
 )
 from prompt_patterns.strategy_dialogue import build_dialogue_prompt, parse_dialogue_response
-from screening.sectors import SECTOR_MAP
-from screening.universe import UNIVERSE, UNIVERSE_NAMES
 from sector_analysis.network import build_mermaid_lead_lag_graph
 from strategy_builder.backtest import run_strategy_backtest
 from strategy_builder.conditions import (
@@ -73,11 +72,16 @@ def _render_sector_rotation_suggestion() -> None:
         )
         band = None if band_choice == "すべて（自動選択）" else band_choice
 
+        company_profiles = load_all_company_profiles()
+        sector_jp_by_ticker = {
+            p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
+        }
+        names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
         watchlist = build_watchlist_from_rotation(
             payload.get("ticker_latest_return_pct", {}),
             payload.get("network_pairs", []),
-            SECTOR_MAP,
-            UNIVERSE_NAMES,
+            sector_jp_by_ticker,
+            names_by_ticker,
             band=band,
         )
         if watchlist["idea_text"] is None:
@@ -165,7 +169,10 @@ def _render_dialogue_section() -> None:
     # （直前にAIの質問を表示済み、あるいは確定候補を表示中の再実行で
     # 重複してLLMを呼ばないようにするための判定）
     if history[-1]["role"] == "user" and pending is None:
-        prompt = build_dialogue_prompt(history, sectors=sorted(set(SECTOR_MAP.values())))
+        sector_jp_values = {
+            p["sector_jp"] for p in load_all_company_profiles() if p["sector_jp"]
+        }
+        prompt = build_dialogue_prompt(history, sectors=sorted(sector_jp_values))
         with st.spinner("AIが回答を考えています..."):
             raw = call_llm(prompt)
         parsed = parse_dialogue_response(raw)
@@ -234,11 +241,17 @@ def _render_backtest_section() -> None:
 
     if st.button("バックテストを実行", key="strategy_run_backtest"):
         with st.spinner("バックテストを実行中..."):
-            universe_df = fetch_universe_fundamentals(UNIVERSE)
-            universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+            company_profiles = load_all_company_profiles()
+            tickers = [p["ticker"] for p in company_profiles]
+            names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
+            sector_jp_by_ticker = {
+                p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
+            }
+            universe_df = fetch_universe_fundamentals(tickers)
+            universe_df["name"] = universe_df["ticker"].map(names_by_ticker).fillna(
                 universe_df["name"]
             )
-            universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
+            universe_df["sector"] = universe_df["ticker"].map(sector_jp_by_ticker)
             matched_df = apply_strategy_conditions(universe_df, strategy)
             matched_tickers = matched_df["ticker"].tolist()
 
@@ -304,7 +317,10 @@ def _render_screening_sector_network(result_df: pd.DataFrame) -> None:
             )
             return
 
-    selected_sectors = set(result_df["ticker"].map(SECTOR_MAP).dropna())
+    sector_jp_by_ticker = {
+        p["ticker"]: p["sector_jp"] for p in load_all_company_profiles() if p["sector_jp"]
+    }
+    selected_sectors = set(result_df["ticker"].map(sector_jp_by_ticker).dropna())
     network_df = pd.DataFrame(payload.get("network_pairs", []))
     if network_df.empty:
         st.info("業種間ネットワークのデータがありません。")
@@ -334,11 +350,17 @@ def _render_screening_section() -> None:
 
     if st.button("最新データで銘柄選定を実行", key="strategy_run_screening"):
         with st.spinner("銘柄を絞り込み中..."):
-            universe_df = fetch_universe_fundamentals(UNIVERSE)
-            universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+            company_profiles = load_all_company_profiles()
+            tickers = [p["ticker"] for p in company_profiles]
+            names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
+            sector_jp_by_ticker = {
+                p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
+            }
+            universe_df = fetch_universe_fundamentals(tickers)
+            universe_df["name"] = universe_df["ticker"].map(names_by_ticker).fillna(
                 universe_df["name"]
             )
-            universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
+            universe_df["sector"] = universe_df["ticker"].map(sector_jp_by_ticker)
             matched_df = apply_strategy_conditions(universe_df, strategy)
             matched_df = sort_by_strategy(matched_df, strategy)
             matched_df = matched_df.copy()
