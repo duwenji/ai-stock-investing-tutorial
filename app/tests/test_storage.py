@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from db.engine import create_db_engine, init_db
+from db.models import User
 from portfolio_management.storage import load_holdings, save_holdings
 
 
@@ -9,7 +10,12 @@ from portfolio_management.storage import load_holdings, save_holdings
 def session_factory(tmp_path):
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(engine)
-    return sessionmaker(bind=engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as session:
+        session.add(User(username="user1", hashed_password="h"))
+        session.add(User(username="user2", hashed_password="h"))
+        session.commit()
+    return factory
 
 
 def test_load_holdings_returns_empty_list_when_none_saved(session_factory):

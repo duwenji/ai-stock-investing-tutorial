@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from db.engine import create_db_engine, init_db
+from db.models import User
 from sector_analysis.display_settings import (
     DEFAULT_SECTOR_DISPLAY_SETTINGS,
     _normalize,
@@ -89,7 +90,12 @@ def test_normalize_unknown_height_key_is_dropped():
 def session_factory(tmp_path):
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(engine)
-    return sessionmaker(bind=engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as session:
+        session.add(User(username="user1", hashed_password="h"))
+        session.add(User(username="user2", hashed_password="h"))
+        session.commit()
+    return factory
 
 
 def test_load_returns_defaults_when_no_row(session_factory):
