@@ -3,17 +3,13 @@
 複数銘柄の並行取得もあわせて提供する。"""
 
 import datetime
-import hashlib
-import json
 import logging
 import re
-from pathlib import Path
 
 import pandas as pd
 import requests
 import yfinance as yf
 
-from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
 from db.engine import SessionLocal
@@ -394,25 +390,18 @@ def _to_pct(value: float | None) -> float | None:
 
 def fetch_universe_fundamentals(
     tickers: list[str],
-    cache_dir: Path,
+    session_factory=SessionLocal,
     fetch_fundamentals=fetch_fundamentals,
 ) -> pd.DataFrame:
     """複数銘柄のファンダメンタルズをまとめて取得し、DataFrameとして返す。
 
-    セクター分析などスクリーニング用途で銘柄集合全体を扱うため、
-    キャッシュと並行取得によって繰り返し呼び出しのコストを抑える。
+    銘柄ごとの鮮度チェック・DB読み書きはfetch_fundamentals（DB read-through）に
+    委譲し、ここでは並行実行（複数銘柄を並行してAPI取得）と結果の整形のみを行う。
     """
-    # 銘柄集合ごとに一意なキャッシュキーを作る（順序に依らないようソートしてハッシュ化）
-    cache_key = "universe-" + hashlib.sha256(
-        "-".join(sorted(tickers)).encode("utf-8")
-    ).hexdigest()[:12]
-    cached = read_cache(cache_dir, cache_key)
-    if cached is not None:
-        return pd.DataFrame(json.loads(cached))
-
     with log_duration(logger, f"ユニバースfundamentals一括取得（{len(tickers)}銘柄）"):
-        # 銘柄数が多いと逐次取得は遅いため、複数銘柄を並行してAPI取得する
-        results = map_concurrently(tickers, fetch_fundamentals)
+        results = map_concurrently(
+            tickers, lambda ticker: fetch_fundamentals(ticker, session_factory=session_factory)
+        )
         rows = []
         for ticker_symbol in tickers:
             data = results[ticker_symbol]
@@ -435,39 +424,28 @@ def fetch_universe_fundamentals(
                     "revenue_growth_pct": _to_pct(data.get("revenue_growth")),
                 }
             )
-        df = pd.DataFrame(rows)
-        write_cache(cache_dir, cache_key, df.to_json(orient="records", force_ascii=False))
-    return df
+        return pd.DataFrame(rows)
 
 
 def fetch_universe_price_histories(
     tickers: list[str],
     period: str,
-    cache_dir: Path,
+    session_factory=SessionLocal,
     fetch_price_history=fetch_price_history,
 ) -> dict[str, pd.Series]:
     """複数銘柄の終値時系列をまとめて取得し、{ticker: pd.Series} として返す。
 
     strategy_builderの簡易バックテスト・銘柄選定実行画面で、絞り込み後の
-    銘柄群の株価をまとめて取得する用途に使う。取得失敗・空データの銘柄は
-    結果から除外する。
+    銘柄群の株価をまとめて取得する用途に使う。銘柄ごとの鮮度チェック・DB読み書きは
+    fetch_price_history（DB read-through）に委譲し、ここでは並行実行と結果の整形
+    のみを行う。取得失敗・空データの銘柄は結果から除外する。
     """
-    cache_key = "universe-prices-" + hashlib.sha256(
-        f"{period}-{'-'.join(sorted(tickers))}".encode("utf-8")
-    ).hexdigest()[:12]
-    cached = read_cache(cache_dir, cache_key)
-    if cached is not None:
-        payload = json.loads(cached)
-        return {
-            ticker: pd.Series(
-                data["values"], index=pd.to_datetime(data["dates"]), name="Close"
-            )
-            for ticker, data in payload.items()
-        }
-
     with log_duration(logger, f"ユニバース株価一括取得（{len(tickers)}銘柄, period={period}）"):
         results = map_concurrently(
-            tickers, lambda ticker: fetch_price_history(ticker, period=period)
+            tickers,
+            lambda ticker: fetch_price_history(
+                ticker, period=period, session_factory=session_factory
+            ),
         )
         prices_by_ticker: dict[str, pd.Series] = {}
         for ticker in tickers:
@@ -475,18 +453,4 @@ def fetch_universe_price_histories(
             if isinstance(history, Exception) or history is None or history.empty:
                 continue
             prices_by_ticker[ticker] = history["Close"]
-
-        write_cache(
-            cache_dir,
-            cache_key,
-            json.dumps(
-                {
-                    ticker: {
-                        "dates": [d.isoformat() for d in series.index],
-                        "values": [float(v) for v in series],
-                    }
-                    for ticker, series in prices_by_ticker.items()
-                }
-            ),
-        )
-    return prices_by_ticker
+        return prices_by_ticker

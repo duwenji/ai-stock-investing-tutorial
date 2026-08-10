@@ -29,7 +29,6 @@ from strategy_builder.sector_insight import build_watchlist_from_rotation
 from strategy_builder.storage import load_strategies, save_strategy
 
 from app_tabs.shared import (
-    CACHE_DIR,
     DEFAULT_USER_ID,
     handle_table_selection,
     render_mermaid,
@@ -235,7 +234,7 @@ def _render_backtest_section() -> None:
 
     if st.button("バックテストを実行", key="strategy_run_backtest"):
         with st.spinner("バックテストを実行中..."):
-            universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+            universe_df = fetch_universe_fundamentals(UNIVERSE)
             universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                 universe_df["name"]
             )
@@ -247,9 +246,7 @@ def _render_backtest_section() -> None:
                 st.session_state["strategy_backtest_result"] = None
                 st.error("この戦略の条件に合致する銘柄が現在ありませんでした。")
             else:
-                prices_by_ticker = fetch_universe_price_histories(
-                    matched_tickers, period, CACHE_DIR
-                )
+                prices_by_ticker = fetch_universe_price_histories(matched_tickers, period)
                 result = run_strategy_backtest(prices_by_ticker)
                 st.session_state["strategy_backtest_result"] = result
 
@@ -337,7 +334,7 @@ def _render_screening_section() -> None:
 
     if st.button("最新データで銘柄選定を実行", key="strategy_run_screening"):
         with st.spinner("銘柄を絞り込み中..."):
-            universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+            universe_df = fetch_universe_fundamentals(UNIVERSE)
             universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                 universe_df["name"]
             )
@@ -349,9 +346,7 @@ def _render_screening_section() -> None:
                 lambda row: build_match_reason(row, strategy.get("conditions", [])), axis=1
             )
 
-            price_by_ticker = fetch_universe_price_histories(
-                matched_df["ticker"].tolist(), "1y", CACHE_DIR
-            )
+            price_by_ticker = fetch_universe_price_histories(matched_df["ticker"].tolist(), "1y")
 
             def _current_price(ticker: str) -> float | None:
                 series = price_by_ticker.get(ticker)

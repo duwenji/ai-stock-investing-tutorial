@@ -38,27 +38,35 @@ CACHE_DIR = DATA_DIR / "cache"
 DEFAULT_USER_ID = 1
 
 
-@st.cache_data(ttl=60 * 60 * 24)
+@st.cache_data(ttl=60)
 def cached_fetch_japanese_name(ticker: str) -> str | None:
-    """銘柄名はほぼ変化しないため、1日単位でキャッシュして外部API呼び出しを抑える。"""
+    """銘柄名はDB（CompanyProfile）で全ユーザー共有・長期キャッシュされているため、
+    ここでは同一セッション内の連続rerunでDB問い合わせを繰り返さない薄い前段
+    キャッシュとして短時間だけ保持する。"""
     return fetch_japanese_name(ticker)
 
 
-@st.cache_data(ttl=60 * 30)
+@st.cache_data(ttl=60)
 def cached_fetch_price_history(ticker: str, period: str):
-    """株価履歴は頻繁な再取得が不要なため、30分キャッシュして表示速度と負荷を両立する。"""
+    """株価履歴はDB（PriceHistory）で全ユーザー共有・長期キャッシュされているため、
+    ここでは同一セッション内の連続rerunでDB問い合わせを繰り返さない薄い前段
+    キャッシュとして短時間だけ保持する。"""
     return fetch_price_history(ticker, period=period)
 
 
-@st.cache_data(ttl=60 * 30)
+@st.cache_data(ttl=60)
 def cached_analyze_fundamentals(ticker: str) -> dict:
-    """ファンダメンタルズ分析結果を30分キャッシュし、同一銘柄への重複計算を避ける。"""
+    """ファンダメンタルズはDB（FundamentalsSnapshot）で全ユーザー共有・長期
+    キャッシュされているため、ここでは同一セッション内の連続rerunでDB問い合わせを
+    繰り返さない薄い前段キャッシュとして短時間だけ保持する。"""
     return analyze_fundamentals(ticker)
 
 
-@st.cache_data(ttl=60 * 30)
+@st.cache_data(ttl=60)
 def cached_fetch_news(ticker: str) -> list[dict]:
-    """ニュース取得結果を30分キャッシュし、同一銘柄への重複リクエストを避ける。"""
+    """ニュースはDB（TickerNews）に蓄積されるため、ここでは同一セッション内の
+    連続rerunでDB問い合わせを繰り返さない薄い前段キャッシュとして短時間だけ
+    保持する。"""
     return fetch_news(ticker)
 
 

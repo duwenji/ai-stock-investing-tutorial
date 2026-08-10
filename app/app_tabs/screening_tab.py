@@ -17,7 +17,7 @@ from prompt_patterns.screening import (
 from screening.sectors import SECTOR_MAP
 from screening.universe import UNIVERSE, UNIVERSE_NAMES
 
-from app_tabs.shared import CACHE_DIR, handle_table_selection
+from app_tabs.shared import handle_table_selection
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def render_screening_tab() -> None:
             # ユニバース銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
             if st.button("この条件で絞り込む"):
                 with log_duration(logger, "スクリーニング絞り込み実行"):
-                    universe_df = fetch_universe_fundamentals(UNIVERSE, CACHE_DIR)
+                    universe_df = fetch_universe_fundamentals(UNIVERSE)
                     universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
                         universe_df["name"]
                     )

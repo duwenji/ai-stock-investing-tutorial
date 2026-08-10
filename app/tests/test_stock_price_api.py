@@ -356,10 +356,10 @@ def test_company_profile_and_japanese_name_update_independently(monkeypatch, tmp
         assert row.sector == "Consumer Cyclical"
 
 
-def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
+def test_fetch_universe_fundamentals_calls_fetch_fundamentals_per_ticker():
     call_count = {"n": 0}
 
-    def fake_fetch_fundamentals(ticker_symbol):
+    def fake_fetch_fundamentals(ticker_symbol, session_factory=None):
         call_count["n"] += 1
         return {
             "ticker": ticker_symbol,
@@ -371,21 +371,15 @@ def test_fetch_universe_fundamentals_uses_cache_on_second_call(tmp_path):
         }
 
     tickers = ["AAA.T", "BBB.T"]
-    df1 = stock_price_api.fetch_universe_fundamentals(
-        tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+    df = stock_price_api.fetch_universe_fundamentals(
+        tickers, fetch_fundamentals=fake_fetch_fundamentals
     )
     assert call_count["n"] == 2
-    assert df1["dividend_yield_pct"].tolist() == [0.02, 0.02]
-
-    df2 = stock_price_api.fetch_universe_fundamentals(
-        tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
-    )
-    assert call_count["n"] == 2
-    assert df1["ticker"].tolist() == df2["ticker"].tolist()
+    assert df["dividend_yield_pct"].tolist() == [0.02, 0.02]
 
 
-def test_fetch_universe_fundamentals_converts_roe_and_revenue_growth_to_pct(tmp_path):
-    def fake_fetch_fundamentals(ticker_symbol):
+def test_fetch_universe_fundamentals_converts_roe_and_revenue_growth_to_pct():
+    def fake_fetch_fundamentals(ticker_symbol, session_factory=None):
         return {
             "ticker": ticker_symbol,
             "name": ticker_symbol,
@@ -398,14 +392,14 @@ def test_fetch_universe_fundamentals_converts_roe_and_revenue_growth_to_pct(tmp_
         }
 
     df = stock_price_api.fetch_universe_fundamentals(
-        ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+        ["AAA.T"], fetch_fundamentals=fake_fetch_fundamentals
     )
     assert df["roe_pct"].tolist() == pytest.approx([15.5])
     assert df["revenue_growth_pct"].tolist() == pytest.approx([8.2])
 
 
-def test_fetch_universe_fundamentals_handles_missing_roe_and_revenue_growth(tmp_path):
-    def fake_fetch_fundamentals(ticker_symbol):
+def test_fetch_universe_fundamentals_handles_missing_roe_and_revenue_growth():
+    def fake_fetch_fundamentals(ticker_symbol, session_factory=None):
         return {
             "ticker": ticker_symbol,
             "name": ticker_symbol,
@@ -418,14 +412,14 @@ def test_fetch_universe_fundamentals_handles_missing_roe_and_revenue_growth(tmp_
         }
 
     df = stock_price_api.fetch_universe_fundamentals(
-        ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+        ["AAA.T"], fetch_fundamentals=fake_fetch_fundamentals
     )
     assert df["roe_pct"].iloc[0] is None or pd.isna(df["roe_pct"].iloc[0])
     assert df["revenue_growth_pct"].iloc[0] is None or pd.isna(df["revenue_growth_pct"].iloc[0])
 
 
-def test_fetch_universe_fundamentals_skips_ticker_that_raises_and_keeps_others(tmp_path):
-    def fake_fetch_fundamentals(ticker_symbol):
+def test_fetch_universe_fundamentals_skips_ticker_that_raises_and_keeps_others():
+    def fake_fetch_fundamentals(ticker_symbol, session_factory=None):
         if ticker_symbol == "BAD.T":
             raise ValueError("boom")
         return {
@@ -439,13 +433,13 @@ def test_fetch_universe_fundamentals_skips_ticker_that_raises_and_keeps_others(t
 
     tickers = ["AAA.T", "BAD.T", "CCC.T"]
     df = stock_price_api.fetch_universe_fundamentals(
-        tickers, tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+        tickers, fetch_fundamentals=fake_fetch_fundamentals
     )
     assert sorted(df["ticker"].tolist()) == ["AAA.T", "CCC.T"]
 
 
-def test_fetch_universe_fundamentals_logs_duration(tmp_path, caplog):
-    def fake_fetch_fundamentals(ticker_symbol):
+def test_fetch_universe_fundamentals_logs_duration(caplog):
+    def fake_fetch_fundamentals(ticker_symbol, session_factory=None):
         return {
             "ticker": ticker_symbol,
             "name": ticker_symbol,
@@ -457,7 +451,7 @@ def test_fetch_universe_fundamentals_logs_duration(tmp_path, caplog):
 
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
         stock_price_api.fetch_universe_fundamentals(
-            ["AAA.T"], tmp_path, fetch_fundamentals=fake_fetch_fundamentals
+            ["AAA.T"], fetch_fundamentals=fake_fetch_fundamentals
         )
 
     assert "ユニバースfundamentals一括取得" in caplog.text
@@ -529,48 +523,42 @@ def test_fetch_japanese_name_logs_request_and_response(monkeypatch, caplog, tmp_
     assert "シャープ" in caplog.text
 
 
-def test_fetch_universe_price_histories_uses_cache_on_second_call(tmp_path):
+def test_fetch_universe_price_histories_calls_fetch_price_history_per_ticker():
     call_count = {"n": 0}
     dates = pd.date_range("2026-01-01", periods=3, freq="D")
 
-    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+    def fake_fetch_price_history(ticker_symbol, period="1mo", session_factory=None):
         call_count["n"] += 1
         return pd.DataFrame({"Close": [10.0, 11.0, 12.0]}, index=dates)
 
     tickers = ["AAA.T", "BBB.T"]
-    result1 = stock_price_api.fetch_universe_price_histories(
-        tickers, "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+    result = stock_price_api.fetch_universe_price_histories(
+        tickers, "1y", fetch_price_history=fake_fetch_price_history
     )
     assert call_count["n"] == 2
-    assert result1["AAA.T"].tolist() == [10.0, 11.0, 12.0]
-
-    result2 = stock_price_api.fetch_universe_price_histories(
-        tickers, "1y", tmp_path, fetch_price_history=fake_fetch_price_history
-    )
-    assert call_count["n"] == 2
-    assert result2["AAA.T"].tolist() == [10.0, 11.0, 12.0]
+    assert result["AAA.T"].tolist() == [10.0, 11.0, 12.0]
 
 
-def test_fetch_universe_price_histories_skips_failed_ticker(tmp_path):
+def test_fetch_universe_price_histories_skips_failed_ticker():
     dates = pd.date_range("2026-01-01", periods=2, freq="D")
 
-    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+    def fake_fetch_price_history(ticker_symbol, period="1mo", session_factory=None):
         if ticker_symbol == "BAD.T":
             raise ValueError("boom")
         return pd.DataFrame({"Close": [1.0, 2.0]}, index=dates)
 
     result = stock_price_api.fetch_universe_price_histories(
-        ["AAA.T", "BAD.T"], "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+        ["AAA.T", "BAD.T"], "1y", fetch_price_history=fake_fetch_price_history
     )
     assert list(result.keys()) == ["AAA.T"]
 
 
-def test_fetch_universe_price_histories_skips_empty_history(tmp_path):
-    def fake_fetch_price_history(ticker_symbol, period="1mo"):
+def test_fetch_universe_price_histories_skips_empty_history():
+    def fake_fetch_price_history(ticker_symbol, period="1mo", session_factory=None):
         return pd.DataFrame({"Close": []})
 
     result = stock_price_api.fetch_universe_price_histories(
-        ["AAA.T"], "1y", tmp_path, fetch_price_history=fake_fetch_price_history
+        ["AAA.T"], "1y", fetch_price_history=fake_fetch_price_history
     )
     assert result == {}
 
