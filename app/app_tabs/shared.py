@@ -259,6 +259,11 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
             st.markdown(f"- [{title}]({link})（{publisher}）")
         else:
             st.markdown(f"- {title}（{publisher}）")
+        # 要約は日本語訳（summary_ja）を優先し、翻訳が無ければ英文原文（summary）を表示する
+        summary_text = item.get("summary_ja") or item.get("summary")
+        if summary_text:
+            with st.expander("要約を見る"):
+                st.write(summary_text)
 
     st.markdown(DISCLAIMER_NOTICE)
 
