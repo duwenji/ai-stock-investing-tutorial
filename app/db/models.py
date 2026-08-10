@@ -123,4 +123,5 @@ class TickerNews(Base):
     title: Mapped[str | None] = mapped_column(nullable=True)
     publisher: Mapped[str | None] = mapped_column(nullable=True)
     link: Mapped[str | None] = mapped_column(nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     fetched_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)

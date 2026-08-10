@@ -47,13 +47,16 @@ def init_db(engine: Engine) -> None:
     price_history/fundamentals_snapshots/ticker_news/holdingsのticker列に対する
     company_profiles.tickerへの外部キー制約を実効化し、company_profilesに
     sector_jp列（東証17業種区分。UNIVERSE/SECTOR_MAP廃止に伴う追加）が無ければ
-    追加する（既存DBでは孤児tickerのバックフィル＋テーブル再作成を伴う）。"""
+    追加する（既存DBでは孤児tickerのバックフィル＋テーブル再作成を伴う）。
+    ticker_newsにsummary列（yfinance由来の記事要約。ニュース活用強化に伴う追加）が
+    無ければ追加する。"""
     Base.metadata.create_all(engine)
     _ensure_user_name_columns(engine)
     _ensure_admin_column(engine)
     _grant_admin_to_first_user_if_none_exists(engine)
     _ensure_market_data_foreign_keys(engine)
     _ensure_company_profile_sector_jp_column(engine)
+    _ensure_ticker_news_summary_column(engine)
     _seed_default_company_profiles(engine)
 
 
@@ -103,6 +106,16 @@ def _ensure_company_profile_sector_jp_column(engine: Engine) -> None:
         _add_column_if_missing(
             connection, "company_profiles", existing_columns, "sector_jp", "TEXT"
         )
+        connection.commit()
+
+
+def _ensure_ticker_news_summary_column(engine: Engine) -> None:
+    with engine.connect() as connection:
+        existing_columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(ticker_news)")).fetchall()
+        }
+        _add_column_if_missing(connection, "ticker_news", existing_columns, "summary", "TEXT")
         connection.commit()
 
 

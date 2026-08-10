@@ -659,3 +659,27 @@ def test_init_db_migrates_multiple_legacy_tables_each_with_their_own_ticker_inde
             session.query(FundamentalsSnapshot).filter_by(ticker="8888.T").one()
         )
         assert fundamentals_row.trailing_pe == 12.3
+
+
+def test_init_db_adds_summary_column_to_existing_ticker_news_table(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE ticker_news ("
+                "id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, title TEXT, "
+                "publisher TEXT, link TEXT, fetched_at DATETIME, "
+                "FOREIGN KEY(ticker) REFERENCES company_profiles (ticker))"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(ticker_news)")).fetchall()
+        }
+    assert "summary" in columns
