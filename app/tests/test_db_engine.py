@@ -335,3 +335,63 @@ def test_init_db_column_addition_tolerates_concurrent_duplicate_add(tmp_path):
             row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
         }
     assert "is_admin" in columns
+
+
+def test_init_db_migrates_legacy_price_history_table_to_add_foreign_key(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE price_history ("
+                "id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, date TEXT NOT NULL, "
+                "open FLOAT NOT NULL, high FLOAT NOT NULL, low FLOAT NOT NULL, "
+                "close FLOAT NOT NULL, volume FLOAT NOT NULL, "
+                "UNIQUE (ticker, date))"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO price_history (ticker, date, open, high, low, close, volume) "
+                "VALUES ('9999.T', '2026-01-01', 10, 11, 9, 10, 100)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        row = session.query(PriceHistory).filter_by(ticker="9999.T").one()
+        assert row.date == "2026-01-01"
+        assert row.open == 10.0
+
+        profile = session.get(CompanyProfile, "9999.T")
+        assert profile is not None
+
+        session.add(
+            PriceHistory(
+                ticker="NOPROFILE.T",
+                date="2026-01-02",
+                open=1,
+                high=1,
+                low=1,
+                close=1,
+                volume=1,
+            )
+        )
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_init_db_market_data_migration_is_idempotent(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        assert session.query(PriceHistory).count() == 0

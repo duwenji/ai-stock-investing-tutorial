@@ -41,11 +41,15 @@ def init_db(engine: Engine) -> None:
     （Alembic等の本格的なマイグレーションツールは使わない方針のため、この程度の
     単純な追加列はここで直接吸収する）。さらに、DB内にis_admin=Trueのユーザーが
     1人もいなければ、最初に作成されたユーザー（MIN(id)）へ自動的に管理者権限を
-    付与する（既存DBへの追加・新規DBでの初回起動の両方をこの1つの判定でカバーする）。"""
+    付与する（既存DBへの追加・新規DBでの初回起動の両方をこの1つの判定でカバーする）。
+    最後に、price_history/fundamentals_snapshots/ticker_newsのticker列に対する
+    company_profiles.tickerへの外部キー制約を実効化する（既存DBでは孤児tickerの
+    バックフィル＋テーブル再作成を伴う）。"""
     Base.metadata.create_all(engine)
     _ensure_user_name_columns(engine)
     _ensure_admin_column(engine)
     _grant_admin_to_first_user_if_none_exists(engine)
+    _ensure_market_data_foreign_keys(engine)
 
 
 def _add_column_if_missing(connection, existing_columns: set, column: str, ddl_type: str) -> None:
@@ -91,6 +95,89 @@ def _grant_admin_to_first_user_if_none_exists(engine: Engine) -> None:
                 text("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users)")
             )
             connection.commit()
+
+
+def _backfill_missing_company_profiles(connection) -> None:
+    """price_history/fundamentals_snapshots/ticker_newsに存在するがcompany_profilesに
+    行が無いtickerに対して、tickerのみのスタブ行を追加する（FK制約を実効化する前に
+    参照整合性を満たしておくため）。"""
+    for table_name in ("price_history", "fundamentals_snapshots", "ticker_news"):
+        connection.execute(
+            text(
+                f"INSERT INTO company_profiles (ticker) "
+                f"SELECT DISTINCT ticker FROM {table_name} "
+                f"WHERE ticker NOT IN (SELECT ticker FROM company_profiles)"
+            )
+        )
+
+
+def _rebuild_table_with_foreign_key_if_missing(
+    engine: Engine, table_name: str, columns: list[str]
+) -> None:
+    """table_nameのticker列にFK制約が未宣言なら、テーブルを作り直して制約を追加する
+    （SQLiteはALTER TABLEでのFK制約後付けに対応していないため）。既にFK制約が
+    宣言済み（新規作成されたテーブル等）なら何もしない。"""
+    old_table = f"{table_name}_pre_fk_migration"
+    with engine.connect() as connection:
+        fk_rows = connection.execute(text(f"PRAGMA foreign_key_list({table_name})")).fetchall()
+        if fk_rows:
+            return
+        try:
+            connection.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table}"))
+            connection.commit()
+        except OperationalError:
+            # Streamlitのホットリロード等でinit_db()がほぼ同時に複数回実行され、
+            # 別プロセスが既にリネーム・再作成を完了させていた場合はスキップする
+            connection.rollback()
+            return
+
+    Base.metadata.tables[table_name].create(bind=engine)
+
+    column_list = ", ".join(columns)
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                f"INSERT INTO {table_name} ({column_list}) "
+                f"SELECT {column_list} FROM {old_table}"
+            )
+        )
+        connection.execute(text(f"DROP TABLE {old_table}"))
+        connection.commit()
+
+
+def _ensure_market_data_foreign_keys(engine: Engine) -> None:
+    """price_history/fundamentals_snapshots/ticker_newsのticker列に、company_profiles.ticker
+    への外部キー制約を実効化する。(1) 各テーブルに存在するがcompany_profilesに無い
+    tickerをスタブ行として先に補完し、(2) FK制約が未宣言のテーブルのみ作り直す。
+    新規作成されたばかりのDBでは(1)(2)とも対象が無いため実質何もしない。"""
+    with engine.connect() as connection:
+        _backfill_missing_company_profiles(connection)
+        connection.commit()
+
+    _rebuild_table_with_foreign_key_if_missing(
+        engine,
+        "price_history",
+        ["id", "ticker", "date", "open", "high", "low", "close", "volume"],
+    )
+    _rebuild_table_with_foreign_key_if_missing(
+        engine,
+        "fundamentals_snapshots",
+        [
+            "id",
+            "ticker",
+            "snapshot_date",
+            "name",
+            "trailing_pe",
+            "price_to_book",
+            "dividend_yield",
+            "market_cap",
+            "return_on_equity",
+            "revenue_growth",
+        ],
+    )
+    _rebuild_table_with_foreign_key_if_missing(
+        engine, "ticker_news", ["id", "ticker", "title", "publisher", "link", "fetched_at"]
+    )
 
 
 engine = create_db_engine()
