@@ -312,8 +312,8 @@ flowchart TB
 | - | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 1 | ポートフォリオ         | 保有銘柄を登録し、構成比・損益・リスク・ファンダメンタル・テクニカル・ニュースセンチメントを統合したレビューレポートを生成する |
 | 2 | スクリーニング         | 自然言語の投資条件をAIがフィルタ条件（JSON、per/pbr/dividend_yield_pct/sectorに対応）に変換し、確認後にUNIVERSE 226銘柄から絞り込む |
-| 3 | バックテスト           | 指定銘柄に対し4戦略×2パラメータ組でベクトル化バックテストを実行し、AIによる結果解説と改善提案の2段階（Prompt Chaining）を表示する |
-| 4 | 一括バックテスト       | UNIVERSE 226銘柄＋保有銘柄に対し標準プリセットで一括バックテストし、リスク調整済みリターン順にランキング表示する               |
+| 3 | バックテスト           | 指定銘柄に対し4戦略について近傍グリッドサーチ（15〜40通り）でベクトル化バックテストを実行し、ヒートマップと安定性チェック（変動係数）を表示したうえで、AIによる結果解説と改善提案の2段階（Prompt Chaining）を表示する |
+| 4 | 一括バックテスト       | UNIVERSE 226銘柄＋保有銘柄に対し、選択した戦略について銘柄ごとに近傍グリッドサーチで最良パラメータを探索して一括バックテストし、リスク調整済みリターン順にランキング表示する               |
 | 5 | セクターローテーション | UNIVERSE銘柄を東証17業種に分類し、業種間の値動きの時差相関（リード・ラグ）・全ペアネットワーク図・ウェーブレット分析（時間変化するリード・ラグ）を過去の株価データから計算して表示する。表示するセクションのON/OFF・順序・高さはユーザーが設定可能 |
 | 6 | AI戦略ビルダー         | 投資アイデアをAIとの対話で構造化条件（JSON）に詰め、確定候補は自動評価・改善ループ（Evaluator-Optimizer）を経てから確認・保存し、簡易バックテストと最新データでの銘柄選定までを一気通貫で行う |
 | 7 | AI質問箱               | 自由記述の投資質問をAIが5カテゴリに分類し（Routing）、専用の分析エージェントへ振り分けて回答する |
@@ -487,25 +487,29 @@ sequenceDiagram
     alt 株価データが空 or 必要日数未満
         UI-->>User: 「データが取得できないか日数不足のため実行できません」エラー表示（終了）
     else 実行可能
-        UI->>Backtest: run_backtest_comparison(prices, strategy_func, presets, cost)
-        loop プリセット（標準/短期など2組）
+        UI->>Backtest: run_grid_search(prices, strategy_func, param_grid, fixed_params, cost)
+        loop param_gridの全組み合わせ（15〜40通り）
             Backtest->>Backtest: 戦略関数でpositionを計算（シグナル翌日約定でシフト）
             Backtest->>Backtest: _finalize_backtest（累積リターン・ベンチマーク・勝率・最大DD算出）
+            Backtest->>Backtest: risk_adjusted_return = 累積リターン÷|最大DD|
         end
-        Backtest-->>UI: パラメータ組ごとの比較結果 dict
-        UI-->>User: 比較テーブル表示
+        Backtest-->>UI: グリッドサーチ結果 list[dict]
+        UI->>Backtest: summarize_grid_stability(grid_results)
+        Backtest-->>UI: best/worst/変動係数(cv)/is_stable
+        UI-->>User: ヒートマップ（2軸パラメータ×リスク調整済みリターン）＋安定性サマリー表示
         UI->>UI: cache_key = "backtest-" + sha256(strategy-ticker-period-cost)[:12]
         UI->>Cache: read_cache(cache_key)（force_regenerateなら省略）
         alt キャッシュあり
             Cache-->>UI: 解説文（改善提案含む、キャッシュ済み）
         else キャッシュなし
-            UI->>BacktestP: generate_backtest_explanation(...)
-            BacktestP->>LLM: Step1: build_backtest_prompt(比較結果) → call_llm
+            UI->>BacktestP: generate_backtest_explanation(ticker, grid_results, strategy_name)
+            BacktestP->>BacktestP: summarize_grid_stability(grid_results)で最良/最悪・安定性を整形
+            BacktestP->>LLM: Step1: build_backtest_prompt(比較結果, stability) → call_llm
             LLM-->>BacktestP: 結果解説
             alt Step1が空文字
                 BacktestP-->>UI: 「解説の生成に失敗しました。」（Step2に進まない）
             else Step1が有効
-                BacktestP->>LLM: Step2: build_improvement_prompt(比較結果, 結果解説) → call_llm
+                BacktestP->>LLM: Step2: build_improvement_prompt(比較結果, 結果解説, stability) → call_llm
                 LLM-->>BacktestP: 改善提案
                 BacktestP-->>UI: 解説本文 + （改善提案が空でなければ）改善提案セクション（免責事項付き）
             end
@@ -517,9 +521,9 @@ sequenceDiagram
 
 #### ステップ・分岐の説明
 
-1. **戦略の選択**: `STRATEGIES` に定義された4戦略（移動平均クロスオーバー／RSI逆張り／MACDクロスオーバー／ボリンジャーバンド逆張り）から選ぶ。各戦略は `func`・`presets`（2パラメータ組）・`min_days`（実行に必要な最小日数）を持つ。
+1. **戦略の選択**: `STRATEGIES` に定義された4戦略（移動平均クロスオーバー／RSI逆張り／MACDクロスオーバー／ボリンジャーバンド逆張り）から選ぶ。各戦略は `func`・`param_grid`（探索する2軸パラメータ）・`min_days`（実行に必要な最小日数）を持ち、RSI・MACDは3つ目のパラメータを `fixed_params` で固定する。
 2. **株価取得**: `app_tabs/shared.py` の `cached_fetch_price_history`（`st.cache_data(ttl=30分)`）経由で取得するため、同一銘柄・同一期間の再実行はセッション内では再フェッチしない。
-3. **データ不足時の分岐**: 取得した株価が空、または `len(history) < strategy["min_days"]` の場合は即座にエラー表示して処理を終了する（例: MA戦略は75日、RSIは14日必要）。
+3. **データ不足時の分岐**: 取得した株価が空、または `len(history) < strategy["min_days"]` の場合は即座にエラー表示して処理を終了する（例: MA戦略は85日、RSIは18日必要）。
 4. **バックテスト計算（`_finalize_backtest`）**:
    - 各戦略は当日のシグナルに基づき `position`（0/1）を算出し、**1日シフトして翌日約定とする**（ルックアヘッドバイアス回避、全戦略共通のコメント付きロジック）。
    - `transaction_cost_pct` が0より大きい場合、ポジションが変化した日（`position.diff() != 0`）にのみ取引コスト（0.1%/回）を差し引く。
@@ -527,8 +531,9 @@ sequenceDiagram
    - 勝率は「ポジションを持っている日」のうちリターンがプラスだった日の割合。ポジションを一度も持たない場合は0.0。
    - 最大ドローダウンは累積リターン曲線の `cummax` からの下落率の最小値。
 5. **RSI逆張り／ボリンジャーバンド逆張りのエントリー・エグジット**: いずれも「entry条件で1、exit条件で0を代入し `ffill` で保持」という共通パターン。RSIは「下から上に売られすぎ水準を回復した日にエントリー、買われすぎ水準到達で手仕舞い」。ボリンジャーは「下バンド割れでエントリー、中心線（移動平均）以上への回帰で手仕舞い」。
-6. **キャッシュ判定**: `"backtest-"` + `strategy名-ticker-period-cost` のハッシュをキーとし、`force_regenerate` チェックボックスがオフかつ当日分キャッシュがあれば解説文（改善提案含む最終Markdown）をそのまま再利用し、LLM呼び出しをスキップする。`generate_backtest_explanation`のシグネチャ・戻り値の型（Markdown文字列）はStep2追加前と変わらないため、このキャッシュ機構・呼び出し元は無改修で機能する。
-7. **AI解説の生成（Prompt Chaining: 2ステップ）**: Step1（`build_backtest_prompt`）は「1.パラメータ組ごとの戦略×ベンチマーク比較 2.勝率・最大DDの意味 3.過学習・取引コスト未考慮への注意喚起 4.パラメータ間の乖離が大きい場合の過学習リスク強調 5.追加確認指標の提案（実行はしない）」を必須項目として明示し、指示的な売買文言を禁止する。Step1の結果が空文字の場合はgate（検証）としてStep2を呼ばずエラーメッセージを返す。Step1が有効な場合のみ、その結果をStep2（`build_improvement_prompt`）に渡し、過学習リスク・取引コスト等の追加観点を提案させる。Step2の結果が空文字の場合は改善提案セクションのみ省略し、Step1の結果は失わない（Step2の失敗でStep1の価値ある結果まで失わせない設計）。
+6. **近傍グリッドサーチと安定性チェック**: `run_grid_search` が `param_grid` の全組み合わせ（デカルト積）でバックテストを実行し、各組み合わせに `risk_adjusted_return`（収益率÷|最大DD|）を付与する。`summarize_grid_stability` が、その中の最良/最悪の組み合わせと、変動係数（標準偏差÷|平均|）による安定性判定（`cv < 0.5` で安定）を求める。UIはこの結果をヒートマップ（2軸パラメータ×色=リスク調整済みリターン）と安定性バッジで表示する。
+7. **キャッシュ判定**: `"backtest-"` + `strategy名-ticker-period-cost` のハッシュをキーとし、`force_regenerate` チェックボックスがオフかつ当日分キャッシュがあれば解説文（改善提案含む最終Markdown）をそのまま再利用し、LLM呼び出しをスキップする。
+8. **AI解説の生成（Prompt Chaining: 2ステップ）**: `generate_backtest_explanation` は `grid_results` を受け取り、内部で `summarize_grid_stability` を呼んで最良/最悪の2点と安定性情報（`cv`・`is_stable`）を整形する。Step1（`build_backtest_prompt`）は「1.最良パラメータの戦略×ベンチマーク比較 2.勝率・最大DDの意味 3.過学習・取引コスト未考慮への注意喚起 4.安定性（is_stable/cv）を踏まえた過学習リスクの強調 5.追加確認指標の提案（実行はしない）」を必須項目として明示し、指示的な売買文言を禁止する。Step1の結果が空文字の場合はgate（検証）としてStep2を呼ばずエラーメッセージを返す。Step1が有効な場合のみ、その結果と安定性情報をStep2（`build_improvement_prompt`）に渡し、過学習リスク・取引コスト等の追加観点を提案させる。Step2の結果が空文字の場合は改善提案セクションのみ省略し、Step1の結果は失わない。
 
 ---
 
@@ -554,7 +559,7 @@ sequenceDiagram
     UI->>UI: cache_key = "universe-backtest-" + sha256(strategy-period-cost-tickers)[:12]
     UI->>Cache: read_cache(cache_key)（force_regenerateなら省略）
     alt キャッシュあり
-        Cache-->>UI: payload（ranking_rows/skipped_tickers/comments/preset_label）
+        Cache-->>UI: payload（ranking_rows/skipped_tickers/comments）
     else キャッシュなし
         UI->>PriceAPI: map_concurrently(target_tickers, cached_fetch_price_history) 最大8並列（単一spinner表示）
         loop target_tickersごと（結果集約）
@@ -567,12 +572,13 @@ sequenceDiagram
         alt 取得できた銘柄が0件
             UI-->>User: 「バックテスト可能な銘柄がありませんでした」エラー表示
         else 1件以上あり
-            UI->>Backtest: run_universe_backtest_ranking(prices_by_ticker, func, 標準preset, cost, min_days)
-            loop 銘柄ごと
+            UI->>Backtest: run_universe_backtest_ranking(prices_by_ticker, func, param_grid, fixed_params, cost, min_days)
+            loop 銘柄ごと（ThreadPoolExecutorで最大8並列）
                 Backtest->>Backtest: min_days未満ならスキップ
-                Backtest->>Backtest: バックテスト実行→risk_adjusted_return = 累積リターン÷|最大DD|
+                Backtest->>Backtest: param_gridの全組み合わせでバックテスト（例外時はログ記録しスキップ）
+                Backtest->>Backtest: summarize_grid_stabilityで最良パラメータ・安定性を算出
             end
-            Backtest-->>UI: risk_adjusted_return降順にソート済みランキング
+            Backtest-->>UI: risk_adjusted_return降順（銘柄ごとのbest_params/stability_cv/is_stable付き）のランキング
             UI->>BacktestP: generate_ranking_comments(上位5件, call_llm)
             BacktestP->>LLM: 上位5銘柄まとめて1回のプロンプト
             LLM-->>BacktestP: コメントJSON（パース失敗時は「コメント生成失敗」）
@@ -580,7 +586,7 @@ sequenceDiagram
             UI->>Cache: write_cache(cache_key, payload as JSON)
         end
     end
-    UI-->>User: ランキングテーブル（行クリックで銘柄詳細、4.6参照）+ スキップ銘柄一覧 + 上位5件のAIコメント + 免責事項
+    UI-->>User: ランキングテーブル（採用パラメータ列付き、行クリックで銘柄詳細、4.6参照）+ スキップ銘柄一覧 + 上位5件のAIコメント + 免責事項
 ```
 
 #### ステップ・分岐の説明
@@ -588,10 +594,10 @@ sequenceDiagram
 1. **対象銘柄の決定**: `UNIVERSE`（226銘柄）と現在の保有銘柄ティッカーの**和集合**を対象にする。保有銘柄がユニバース外でも対象に含まれる。
 2. **キャッシュ判定**: `"universe-backtest-"` + `strategy-period-cost-対象銘柄一覧` のハッシュをキーにする。**対象銘柄の集合が変わる**（保有銘柄の増減やUNIVERSEの更新）だけでもキャッシュキーが変わり再計算される。
 3. **株価取得の並列化とエラーハンドリング**: `map_concurrently` で対象銘柄すべてを最大8並列に取得する（進捗バーは銘柄単位の逐次表示ではなく、並列バッチ全体を覆う単一の `st.spinner`）。取得中に例外が発生した銘柄、または空データだった銘柄は `skipped_tickers` に記録して処理を継続する。全銘柄が取得失敗した場合のみ致命的エラーとして扱う。
-4. **標準プリセットのみ使用**: 単一銘柄バックテストと異なり、一括バックテストは各戦略の `presets[0]`（標準パラメータ）のみを使う（計算量削減のため）。
-5. **ランキング計算**: 銘柄ごとに `min_days` に満たないものは除外。`risk_adjusted_return = total_return_pct / abs(max_drawdown_pct)`（ドローダウンが0の場合は `total_return_pct` をそのまま使用）を計算し、降順にソートする。
+4. **銘柄ごとに近傍グリッドで最良パラメータを探索**: 単一銘柄バックテストと同様の `param_grid`/`fixed_params` を使い、銘柄ごとに全組み合わせをバックテストして `risk_adjusted_return` が最大の組み合わせを採用する（計算は `ThreadPoolExecutor` で最大8並列）。個別銘柄のグリッドサーチで例外が発生した場合はログに記録しその銘柄をランキングから除外する。
+5. **ランキング計算**: 銘柄ごとに `min_days` に満たないものは除外。採用した最良パラメータの `risk_adjusted_return` で降順にソートする。各行に採用パラメータ（`best_params`）・変動係数（`stability_cv`）・安定判定（`is_stable`）を保持する。
 6. **AIコメントは上位5件のみ**: 全銘柄ではなく上位5件だけをまとめて1回のプロンプトでコメント生成する（コスト・待ち時間対策）。
-7. **表示**: ランキング表には保有銘柄・ユニバース双方の日本語名を再解決して付与し、順位列を1から採番する。テーブルは行クリックで銘柄詳細ダイアログ（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)）を開ける。スキップ銘柄がある場合はその一覧を表示し、末尾に免責事項を明示する。
+7. **表示**: ランキング表には保有銘柄・ユニバース双方の日本語名を再解決して付与し、順位列を1から採番する。「採用パラメータ」列に銘柄ごとに探索された最良パラメータを表示する。テーブルは行クリックで銘柄詳細ダイアログ（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)）を開ける。スキップ銘柄がある場合はその一覧を表示し、末尾に免責事項を明示する。
 
 ---
 
