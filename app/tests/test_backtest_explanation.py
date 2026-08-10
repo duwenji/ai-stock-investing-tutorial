@@ -8,9 +8,10 @@ from prompt_patterns.backtest_explanation import (
 
 
 def test_build_backtest_prompt_includes_ticker_and_facts():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4, "trade_days": 312}}
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4, "trade_days": 312}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
 
-    prompt = build_backtest_prompt("7203.T", comparison)
+    prompt = build_backtest_prompt("7203.T", comparison, stability)
 
     assert "7203.T" in prompt
     assert "18.4" in prompt
@@ -18,10 +19,21 @@ def test_build_backtest_prompt_includes_ticker_and_facts():
     assert DISCLAIMER_NOTICE in prompt
 
 
-def test_build_backtest_prompt_instructs_overfitting_and_no_directive_language():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4}}
+def test_build_backtest_prompt_includes_stability_info():
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4}}
+    stability = {"cv": 0.62, "is_stable": False, "grid_size": 30}
 
-    prompt = build_backtest_prompt("7203.T", comparison)
+    prompt = build_backtest_prompt("7203.T", comparison, stability)
+
+    assert "0.62" in prompt
+    assert "is_stable" in prompt
+
+
+def test_build_backtest_prompt_instructs_overfitting_and_no_directive_language():
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
+
+    prompt = build_backtest_prompt("7203.T", comparison, stability)
 
     assert "過学習" in prompt
     assert "取引コスト" in prompt
@@ -30,17 +42,19 @@ def test_build_backtest_prompt_instructs_overfitting_and_no_directive_language()
 
 
 def test_build_backtest_prompt_uses_default_strategy_name_when_omitted():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4}}
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
 
-    prompt = build_backtest_prompt("7203.T", comparison)
+    prompt = build_backtest_prompt("7203.T", comparison, stability)
 
     assert "移動平均クロスオーバー戦略" in prompt
 
 
 def test_build_backtest_prompt_uses_given_strategy_name():
-    comparison = {"標準(14, 30/70)": {"total_return_pct": 5.0}}
+    comparison = {"最良（period=14, oversold=30）": {"total_return_pct": 5.0}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 36}
 
-    prompt = build_backtest_prompt("7203.T", comparison, strategy_name="RSI逆張り")
+    prompt = build_backtest_prompt("7203.T", comparison, stability, strategy_name="RSI逆張り")
 
     assert "RSI逆張り戦略" in prompt
     assert "移動平均クロスオーバー戦略" not in prompt
@@ -82,10 +96,11 @@ def test_generate_ranking_comments_falls_back_on_invalid_json():
 
 
 def test_build_improvement_prompt_includes_ticker_facts_and_prior_explanation():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4, "trade_days": 312}}
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4, "trade_days": 312}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
 
     prompt = build_improvement_prompt(
-        "7203.T", comparison, "これまでの解説文です。", "移動平均クロスオーバー"
+        "7203.T", comparison, "これまでの解説文です。", stability, "移動平均クロスオーバー"
     )
 
     assert "7203.T" in prompt
@@ -95,9 +110,10 @@ def test_build_improvement_prompt_includes_ticker_facts_and_prior_explanation():
 
 
 def test_build_improvement_prompt_instructs_overfitting_and_no_directive_language():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4}}
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
 
-    prompt = build_improvement_prompt("7203.T", comparison, "解説文", "移動平均クロスオーバー")
+    prompt = build_improvement_prompt("7203.T", comparison, "解説文", stability, "移動平均クロスオーバー")
 
     assert "過学習" in prompt
     assert "取引コスト" in prompt
@@ -105,8 +121,9 @@ def test_build_improvement_prompt_instructs_overfitting_and_no_directive_languag
 
 
 def test_build_improvement_prompt_uses_default_strategy_name_when_omitted():
-    comparison = {"標準(25/75)": {"total_return_pct": 18.4}}
+    comparison = {"最良（short_window=27, long_window=75）": {"total_return_pct": 18.4}}
+    stability = {"cv": 0.3, "is_stable": True, "grid_size": 30}
 
-    prompt = build_improvement_prompt("7203.T", comparison, "解説文")
+    prompt = build_improvement_prompt("7203.T", comparison, "解説文", stability)
 
     assert "移動平均クロスオーバー戦略" in prompt
