@@ -157,9 +157,13 @@ def test_upsert_price_history_skips_existing_dates(tmp_path):
         assert session.query(stock_price_api.PriceHistory).count() == 3
 
 
-def test_fetch_fundamentals_maps_info_fields(monkeypatch):
+def test_fetch_fundamentals_maps_info_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
-    result = stock_price_api.fetch_fundamentals("7203.T")
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    result = stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
     assert result["ticker"] == "7203.T"
     assert result["name"] == "Fake Corp"
     assert result["trailing_pe"] == 12.3
@@ -170,13 +174,37 @@ def test_fetch_fundamentals_maps_info_fields(monkeypatch):
     assert result["revenue_growth"] == 0.082
 
 
-def test_fetch_fundamentals_missing_fields_return_none(monkeypatch):
+def test_fetch_fundamentals_missing_fields_return_none(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", EmptyInfoTicker)
-    result = stock_price_api.fetch_fundamentals("7203.T")
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    result = stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
     assert result["trailing_pe"] is None
     assert result["price_to_book"] is None
     assert result["return_on_equity"] is None
     assert result["revenue_growth"] is None
+
+
+def test_fetch_fundamentals_reuses_snapshot_on_second_call_same_day(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+
+    class CountingTicker(FakeTicker):
+        @property
+        def info(self):
+            call_count["n"] += 1
+            return super().info
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+    stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
 
 
 def test_fetch_news_returns_title_publisher_and_link(monkeypatch):
@@ -360,10 +388,14 @@ def test_fetch_price_history_logs_request_and_response(monkeypatch, caplog, tmp_
     assert "101" in caplog.text
 
 
-def test_fetch_fundamentals_logs_request_and_response(monkeypatch, caplog):
+def test_fetch_fundamentals_logs_request_and_response(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_fundamentals("7203.T")
+        stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
 
     assert "fundamentalsリクエスト: ticker=7203.T" in caplog.text
     assert "fundamentalsレスポンス: ticker=7203.T" in caplog.text

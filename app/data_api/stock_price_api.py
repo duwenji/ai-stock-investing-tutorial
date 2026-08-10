@@ -17,7 +17,7 @@ from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
 from db.engine import SessionLocal
-from db.models import PriceHistory
+from db.models import FundamentalsSnapshot, PriceHistory
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +134,8 @@ def fetch_price_history(
         return _load_price_history_from_db(session, ticker_symbol, period)
 
 
-def fetch_fundamentals(ticker_symbol: str) -> dict:
-    """指定銘柄のファンダメンタルズ指標（PER・PBR・配当利回り・ROE・売上高伸び率等）を取得する。"""
+def _fetch_fundamentals_from_yfinance(ticker_symbol: str) -> dict:
+    """yfinanceから直接ファンダメンタルズ指標を取得する（DBを経由しない生の取得処理）。"""
     logger.info("fundamentalsリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
@@ -151,6 +151,51 @@ def fetch_fundamentals(ticker_symbol: str) -> dict:
     }
     logger.info("fundamentalsレスポンス: ticker=%s data=%s", ticker_symbol, result)
     return result
+
+
+def _fundamentals_snapshot_to_dict(row: FundamentalsSnapshot) -> dict:
+    return {
+        "ticker": row.ticker,
+        "name": row.name,
+        "trailing_pe": row.trailing_pe,
+        "price_to_book": row.price_to_book,
+        "dividend_yield": row.dividend_yield,
+        "market_cap": row.market_cap,
+        "return_on_equity": row.return_on_equity,
+        "revenue_growth": row.revenue_growth,
+    }
+
+
+def fetch_fundamentals(ticker_symbol: str, session_factory=SessionLocal) -> dict:
+    """指定銘柄のファンダメンタルズ指標を取得する。当日分のスナップショットが
+    DBにあればそれを返し、無ければyfinanceから取得してDBへ新規スナップショット
+    として追加する（同日内は追加取得しない）。"""
+    today = datetime.date.today().isoformat()
+    with session_factory() as session:
+        row = (
+            session.query(FundamentalsSnapshot)
+            .filter_by(ticker=ticker_symbol, snapshot_date=today)
+            .first()
+        )
+        if row is not None:
+            return _fundamentals_snapshot_to_dict(row)
+
+        result = _fetch_fundamentals_from_yfinance(ticker_symbol)
+        session.add(
+            FundamentalsSnapshot(
+                ticker=ticker_symbol,
+                snapshot_date=today,
+                name=result["name"],
+                trailing_pe=result["trailing_pe"],
+                price_to_book=result["price_to_book"],
+                dividend_yield=result["dividend_yield"],
+                market_cap=result["market_cap"],
+                return_on_equity=result["return_on_equity"],
+                revenue_growth=result["revenue_growth"],
+            )
+        )
+        session.commit()
+        return result
 
 
 def fetch_company_profile(ticker_symbol: str) -> dict:
