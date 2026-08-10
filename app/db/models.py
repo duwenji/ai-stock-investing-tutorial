@@ -21,6 +21,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(nullable=False)
+    first_name: Mapped[str | None] = mapped_column(nullable=True)
+    last_name: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
 
 

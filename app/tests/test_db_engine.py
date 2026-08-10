@@ -129,3 +129,58 @@ def test_fundamentals_snapshot_unique_constraint_on_ticker_and_date(tmp_path):
             assert False, "IntegrityErrorが発生するはず"
         except IntegrityError:
             session.rollback()
+
+
+def test_init_db_adds_missing_user_name_columns_to_existing_table(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    # フェーズ3以前（first_name/last_name追加前）のusersテーブルを模して作成する
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+                "email TEXT UNIQUE, hashed_password TEXT NOT NULL, created_at DATETIME)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
+        }
+    assert "first_name" in columns
+    assert "last_name" in columns
+
+
+def test_init_db_is_idempotent_on_second_call(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    init_db(engine)
+    table_names = set(inspect(engine).get_table_names())
+    assert "users" in table_names
+
+
+def test_user_stores_first_name_and_last_name(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            User(
+                username="taro",
+                hashed_password="hashed",
+                first_name="太郎",
+                last_name="山田",
+            )
+        )
+        session.commit()
+
+    with session_factory() as session:
+        stored = session.query(User).filter_by(username="taro").one()
+        assert stored.first_name == "太郎"
+        assert stored.last_name == "山田"
