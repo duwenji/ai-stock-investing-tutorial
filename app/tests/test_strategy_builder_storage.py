@@ -1,40 +1,44 @@
-import json
+import pytest
+from sqlalchemy.orm import sessionmaker
 
+from db.engine import create_db_engine, init_db
 from strategy_builder.storage import load_strategies, save_strategy
 
 
-def test_load_strategies_returns_empty_list_when_file_missing(tmp_path):
-    assert load_strategies(tmp_path / "missing.json") == []
+@pytest.fixture
+def session_factory(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    return sessionmaker(bind=engine)
 
 
-def test_load_strategies_returns_empty_list_on_malformed_json(tmp_path):
-    path = tmp_path / "strategies.json"
-    path.write_text("not json", encoding="utf-8")
-    assert load_strategies(path) == []
+def test_load_strategies_returns_empty_list_when_none_saved(session_factory):
+    assert load_strategies(1, session_factory=session_factory) == []
 
 
-def test_load_strategies_returns_empty_list_when_not_a_list(tmp_path):
-    path = tmp_path / "strategies.json"
-    path.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
-    assert load_strategies(path) == []
+def test_save_strategy_appends_new_strategy(session_factory):
+    save_strategy(
+        1, {"strategy_name": "割安成長株", "conditions": []}, session_factory=session_factory
+    )
+    assert load_strategies(1, session_factory=session_factory) == [
+        {"strategy_name": "割安成長株", "conditions": []}
+    ]
 
 
-def test_save_strategy_appends_new_strategy(tmp_path):
-    path = tmp_path / "strategies.json"
-    save_strategy(path, {"strategy_name": "割安成長株", "conditions": []})
-    assert load_strategies(path) == [{"strategy_name": "割安成長株", "conditions": []}]
-
-
-def test_save_strategy_overwrites_existing_strategy_with_same_name(tmp_path):
-    path = tmp_path / "strategies.json"
-    save_strategy(path, {"strategy_name": "割安成長株", "conditions": [1]})
-    save_strategy(path, {"strategy_name": "割安成長株", "conditions": [2]})
-    strategies = load_strategies(path)
+def test_save_strategy_overwrites_existing_strategy_with_same_name(session_factory):
+    save_strategy(
+        1, {"strategy_name": "割安成長株", "conditions": [1]}, session_factory=session_factory
+    )
+    save_strategy(
+        1, {"strategy_name": "割安成長株", "conditions": [2]}, session_factory=session_factory
+    )
+    strategies = load_strategies(1, session_factory=session_factory)
     assert len(strategies) == 1
     assert strategies[0]["conditions"] == [2]
 
 
-def test_save_strategy_creates_parent_directory(tmp_path):
-    path = tmp_path / "nested" / "strategies.json"
-    save_strategy(path, {"strategy_name": "A", "conditions": []})
-    assert path.exists()
+def test_strategies_are_scoped_per_user(session_factory):
+    save_strategy(1, {"strategy_name": "A", "conditions": []}, session_factory=session_factory)
+    save_strategy(2, {"strategy_name": "B", "conditions": []}, session_factory=session_factory)
+    assert [s["strategy_name"] for s in load_strategies(1, session_factory=session_factory)] == ["A"]
+    assert [s["strategy_name"] for s in load_strategies(2, session_factory=session_factory)] == ["B"]
