@@ -36,6 +36,31 @@ def test_setup_logging_creates_log_file_with_message(tmp_path):
     assert "hello" in log_file.read_text(encoding="utf-8")
 
 
+def test_setup_logging_uses_custom_log_filename(tmp_path):
+    log_dir = tmp_path / "logs"
+    setup_logging(log_dir=log_dir, log_filename="update_market_data.log")
+
+    logging.getLogger("test_setup_logging_uses_custom_log_filename").info("hello")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    assert (log_dir / "update_market_data.log").exists()
+    assert not (log_dir / "app.log").exists()
+
+
+def test_setup_logging_with_different_filenames_does_not_collide(tmp_path):
+    log_dir = tmp_path / "logs"
+    setup_logging(log_dir=log_dir)
+    setup_logging(log_dir=log_dir, log_filename="update_market_data.log")
+
+    matching = [
+        handler
+        for handler in logging.getLogger().handlers
+        if isinstance(handler, TimedRotatingFileHandler)
+    ]
+    assert len(matching) == 2
+
+
 def test_setup_logging_is_idempotent(tmp_path):
     log_dir = tmp_path / "logs"
     setup_logging(log_dir=log_dir)

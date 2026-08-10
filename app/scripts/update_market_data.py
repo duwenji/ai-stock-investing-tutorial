@@ -64,7 +64,10 @@ def run_update(session_factory=SessionLocal) -> dict:
 
 
 def main() -> None:
-    setup_logging()
+    # app.pyと同じapp.logを共有すると、Windowsでは深夜0時のログローテーション時に
+    # 双方のプロセスがファイルを開いたままだとリネームに失敗するため、バッチ専用の
+    # ログファイルにする。
+    setup_logging(log_filename="update_market_data.log")
     init_db(engine)
     # run_update()のデフォルト引数（session_factory=SessionLocal）はモジュール
     # import時に束縛されテスト側からのmonkeypatchが効かないため、呼び出し時に

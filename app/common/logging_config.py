@@ -11,7 +11,7 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-def setup_logging(log_dir: Path = LOG_DIR) -> None:
+def setup_logging(log_dir: Path = LOG_DIR, log_filename: str = "app.log") -> None:
     """ルートロガーにファイルハンドラを設定する。
 
     Streamlitはユーザー操作のたびにapp.pyを再実行するため、この関数も
@@ -20,9 +20,15 @@ def setup_logging(log_dir: Path = LOG_DIR) -> None:
     スキップ」ではなく自分自身のハンドラの有無で判定するのは、pytestの
     ログキャプチャ等、他の仕組みがルートロガーにハンドラを付けていても
     正しく初期化できるようにするため。
+
+    log_filenameを変えることで、別プロセス（バッチスクリプト等）に専用の
+    ログファイルを持たせられる。app.pyとバッチが同じapp.logを共有すると、
+    Windowsでは深夜0時のログローテーション時に、もう一方のプロセスがまだ
+    ファイルを開いたままだとリネームに失敗する（PermissionError）ため、
+    プロセスごとにログファイルを分けることで回避する。
     """
     root_logger = logging.getLogger()
-    log_path = (log_dir / "app.log").resolve()
+    log_path = (log_dir / log_filename).resolve()
     already_configured = any(
         isinstance(handler, TimedRotatingFileHandler)
         and Path(handler.baseFilename).resolve() == log_path
@@ -33,7 +39,7 @@ def setup_logging(log_dir: Path = LOG_DIR) -> None:
 
     log_dir.mkdir(parents=True, exist_ok=True)
     handler = TimedRotatingFileHandler(
-        log_dir / "app.log",
+        log_dir / log_filename,
         when="midnight",
         backupCount=30,
         encoding="utf-8",
