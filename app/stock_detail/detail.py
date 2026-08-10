@@ -16,7 +16,11 @@ from data_api.llm_client import call_llm as default_call_llm
 from data_api.stock_price_api import fetch_company_profile as default_fetch_company_profile
 from data_api.stock_price_api import fetch_news as default_fetch_news
 from data_api.stock_price_api import fetch_price_history as default_fetch_price_history
-from prompt_patterns.stock_detail import build_company_profile_prompt, build_stock_detail_prompt
+from prompt_patterns.stock_detail import (
+    build_company_profile_prompt,
+    build_news_summary_translation_prompt,
+    build_stock_detail_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,30 @@ def generate_stock_detail(
         fundamentals = analyze_fundamentals(ticker)
         technical = analyze_technical(history)
         news = fetch_news(ticker)
+
+        # 画面表示専用に、要約(summary)がある記事だけをまとめて1回のLLM呼び出しで
+        # 日本語訳する。件数がズレた場合（LLMが指示通りの件数を返さなかった場合）は
+        # 誤った記事に翻訳を割り当てるリスクを避け、summary_jaを付けずに諦める
+        # （画面表示側は summary_ja が無ければ英文summaryにフォールバックする）。
+        indices_with_summary = [i for i, item in enumerate(news) if item.get("summary")]
+        if indices_with_summary:
+            translation_prompt = build_news_summary_translation_prompt(
+                [news[i]["summary"] for i in indices_with_summary]
+            )
+            translated_text = call_llm(translation_prompt)
+            translated_summaries = [part.strip() for part in translated_text.split("@@@")]
+            if len(translated_summaries) == len(indices_with_summary):
+                for index, translated in zip(indices_with_summary, translated_summaries):
+                    news[index]["summary_ja"] = translated
+            else:
+                logger.warning(
+                    "ニュース要約の翻訳件数が入力件数と一致しませんでした"
+                    "（入力%d件、応答%d件）: ticker=%s",
+                    len(indices_with_summary),
+                    len(translated_summaries),
+                    ticker,
+                )
+
         company_profile = fetch_company_profile(ticker)
 
         # チャート描画用に、pandasのDataFrameをJSONシリアライズ可能な

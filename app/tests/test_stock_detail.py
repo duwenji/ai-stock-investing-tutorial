@@ -251,6 +251,116 @@ def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(tmp_
     assert "rsi_series" in result["technical"]
 
 
+def test_generate_stock_detail_translates_news_summaries_and_merges_summary_ja(tmp_path):
+    def fake_call_llm(prompt):
+        if "日本語に翻訳してください" in prompt:
+            return "翻訳文1@@@翻訳文2"
+        if "市場での立ち位置" in prompt:
+            return "プロフィール要約"
+        return "総合コメント"
+
+    result = generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=fake_call_llm,
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [
+            {
+                "title": "ニュース1",
+                "publisher": "社1",
+                "link": "http://example.com/1",
+                "summary": "Summary 1",
+            },
+            {
+                "title": "ニュース2",
+                "publisher": "社2",
+                "link": "http://example.com/2",
+                "summary": "Summary 2",
+            },
+        ],
+        analyze_fundamentals=lambda ticker: {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
+        analyze_technical=lambda history: {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+    )
+
+    assert result["news"][0]["summary_ja"] == "翻訳文1"
+    assert result["news"][1]["summary_ja"] == "翻訳文2"
+
+
+def test_generate_stock_detail_skips_translation_call_when_no_news_have_summary(tmp_path):
+    def fake_call_llm(prompt):
+        assert "日本語に翻訳してください" not in prompt
+        if "市場での立ち位置" in prompt:
+            return "プロフィール要約"
+        return "総合コメント"
+
+    result = generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=fake_call_llm,
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [
+            {"title": "ニュース1", "publisher": "社", "link": "http://example.com"}
+        ],
+        analyze_fundamentals=lambda ticker: {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
+        analyze_technical=lambda history: {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+    )
+
+    assert "summary_ja" not in result["news"][0]
+
+
+def test_generate_stock_detail_leaves_summary_ja_unset_when_translation_count_mismatches(
+    tmp_path, caplog
+):
+    def fake_call_llm(prompt):
+        if "日本語に翻訳してください" in prompt:
+            return "翻訳文1"  # 2件を渡したのに1件しか返さない異常応答を模す
+        if "市場での立ち位置" in prompt:
+            return "プロフィール要約"
+        return "総合コメント"
+
+    with caplog.at_level(logging.WARNING, logger="stock_detail.detail"):
+        result = generate_stock_detail(
+            "AAA.T",
+            "エーエー株式会社",
+            tmp_path,
+            call_llm=fake_call_llm,
+            fetch_price_history=lambda ticker, period: _fake_history(),
+            fetch_news=lambda ticker: [
+                {
+                    "title": "ニュース1",
+                    "publisher": "社1",
+                    "link": "http://example.com/1",
+                    "summary": "Summary 1",
+                },
+                {
+                    "title": "ニュース2",
+                    "publisher": "社2",
+                    "link": "http://example.com/2",
+                    "summary": "Summary 2",
+                },
+            ],
+            analyze_fundamentals=lambda ticker: {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
+            analyze_technical=lambda history: {
+                "ma_short": 101.0, "ma_long": 100.0, "signal": "強気"
+            },
+            fetch_company_profile=lambda ticker: {
+                "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+            },
+        )
+
+    assert "summary_ja" not in result["news"][0]
+    assert "summary_ja" not in result["news"][1]
+    assert "一致しませんでした" in caplog.text
+
+
 def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger="stock_detail.detail"):
         generate_stock_detail(
