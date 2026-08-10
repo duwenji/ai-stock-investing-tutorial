@@ -1,3 +1,4 @@
+import json
 import logging
 
 import pandas as pd
@@ -642,3 +643,24 @@ def test_summarize_grid_stability_marks_unjudgeable_when_mean_near_zero():
 
     assert summary["cv"] is None
     assert summary["is_stable"] is False
+
+
+def test_run_universe_backtest_ranking_row_is_json_serializable_with_real_pandas_data():
+    # pandas/numpy由来の値（numpy.float64等）が summarize_grid_stability を経由すると
+    # cv/is_stable がnumpy型（json非対応）に化けないことを回帰確認する。
+    dates = pd.date_range("2026-01-01", periods=100, freq="D")
+    prices_by_ticker = {
+        "AAA.T": pd.Series(range(100, 200), index=dates, dtype=float),
+    }
+
+    result = run_universe_backtest_ranking(
+        prices_by_ticker,
+        run_ma_crossover_backtest,
+        param_grid={"short_window": [5, 10], "long_window": [25, 30]},
+        min_days=30,
+    )
+
+    row = result[0]
+    assert isinstance(row["is_stable"], bool)
+    assert row["stability_cv"] is None or isinstance(row["stability_cv"], float)
+    json.dumps({"ranking_rows": result})  # 例外を送出しないことを確認する

@@ -55,9 +55,16 @@ def _finalize_backtest(prices: pd.Series, position: pd.Series, transaction_cost_
 
 def _risk_adjusted_return(result: dict) -> float:
     """収益率をリスク（最大ドローダウン）で調整した値を返す。
-    ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま返す。"""
-    drawdown = abs(result["max_drawdown_pct"])
-    risk_adjusted = result["total_return_pct"] / drawdown if drawdown else result["total_return_pct"]
+    ドローダウンが0の場合はゼロ除算を避け、収益率をそのまま返す。
+
+    pandas/numpy由来の値（numpy.float64等）が summarize_grid_stability の
+    statistics.mean/pstdev を経由してnumpy型のまま伝播すると、cv<0.5の比較結果が
+    numpy.bool（JSON非対応）になってしまうため、ここで明示的にfloat化して
+    ネイティブ型に統一する。
+    """
+    drawdown = abs(float(result["max_drawdown_pct"]))
+    total_return = float(result["total_return_pct"])
+    risk_adjusted = total_return / drawdown if drawdown else total_return
     return round(risk_adjusted, 2)
 
 
