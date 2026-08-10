@@ -327,7 +327,9 @@ def test_init_db_column_addition_tolerates_concurrent_duplicate_add(tmp_path):
     from db.engine import _add_column_if_missing
 
     with engine.connect() as connection:
-        _add_column_if_missing(connection, existing_columns=set(), column="is_admin", ddl_type="BOOLEAN DEFAULT 0")
+        _add_column_if_missing(
+            connection, "users", existing_columns=set(), column="is_admin", ddl_type="BOOLEAN DEFAULT 0"
+        )
         connection.commit()
 
     with engine.connect() as connection:
@@ -476,3 +478,30 @@ def test_init_db_migrates_legacy_holdings_table_that_already_has_a_users_foreign
             assert False, "IntegrityErrorが発生するはず"
         except IntegrityError:
             session.rollback()
+
+
+def test_init_db_adds_sector_jp_column_to_existing_company_profiles_table(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE company_profiles ("
+                "ticker TEXT PRIMARY KEY, name TEXT, name_updated_at DATETIME, "
+                "sector TEXT, industry TEXT, business_summary TEXT, "
+                "profile_updated_at DATETIME)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(company_profiles)")
+            ).fetchall()
+        }
+    assert "sector_jp" in columns

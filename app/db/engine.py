@@ -42,24 +42,28 @@ def init_db(engine: Engine) -> None:
     単純な追加列はここで直接吸収する）。さらに、DB内にis_admin=Trueのユーザーが
     1人もいなければ、最初に作成されたユーザー（MIN(id)）へ自動的に管理者権限を
     付与する（既存DBへの追加・新規DBでの初回起動の両方をこの1つの判定でカバーする）。
-    最後に、price_history/fundamentals_snapshots/ticker_newsのticker列に対する
-    company_profiles.tickerへの外部キー制約を実効化する（既存DBでは孤児tickerの
-    バックフィル＋テーブル再作成を伴う）。"""
+    price_history/fundamentals_snapshots/ticker_news/holdingsのticker列に対する
+    company_profiles.tickerへの外部キー制約を実効化し、company_profilesに
+    sector_jp列（東証17業種区分。UNIVERSE/SECTOR_MAP廃止に伴う追加）が無ければ
+    追加する（既存DBでは孤児tickerのバックフィル＋テーブル再作成を伴う）。"""
     Base.metadata.create_all(engine)
     _ensure_user_name_columns(engine)
     _ensure_admin_column(engine)
     _grant_admin_to_first_user_if_none_exists(engine)
     _ensure_market_data_foreign_keys(engine)
+    _ensure_company_profile_sector_jp_column(engine)
 
 
-def _add_column_if_missing(connection, existing_columns: set, column: str, ddl_type: str) -> None:
+def _add_column_if_missing(
+    connection, table_name: str, existing_columns: set, column: str, ddl_type: str
+) -> None:
     """列が無ければALTER TABLEで追加する。Streamlitのホットリロード等でinit_db()が
     ほぼ同時に複数回実行され、片方が追加した直後にもう片方も追加を試みる競合が
     起こり得るため、"duplicate column"エラーは（列が既にある証拠として）無視する。"""
     if column in existing_columns:
         return
     try:
-        connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} {ddl_type}"))
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column} {ddl_type}"))
     except OperationalError as exc:
         if "duplicate column name" not in str(exc).lower():
             raise
@@ -72,7 +76,7 @@ def _ensure_user_name_columns(engine: Engine) -> None:
             row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
         }
         for column in ("first_name", "last_name"):
-            _add_column_if_missing(connection, existing_columns, column, "TEXT")
+            _add_column_if_missing(connection, "users", existing_columns, column, "TEXT")
         connection.commit()
 
 
@@ -81,7 +85,21 @@ def _ensure_admin_column(engine: Engine) -> None:
         existing_columns = {
             row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
         }
-        _add_column_if_missing(connection, existing_columns, "is_admin", "BOOLEAN DEFAULT 0")
+        _add_column_if_missing(connection, "users", existing_columns, "is_admin", "BOOLEAN DEFAULT 0")
+        connection.commit()
+
+
+def _ensure_company_profile_sector_jp_column(engine: Engine) -> None:
+    with engine.connect() as connection:
+        existing_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(company_profiles)")
+            ).fetchall()
+        }
+        _add_column_if_missing(
+            connection, "company_profiles", existing_columns, "sector_jp", "TEXT"
+        )
         connection.commit()
 
 

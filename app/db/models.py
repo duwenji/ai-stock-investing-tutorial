@@ -105,6 +105,7 @@ class CompanyProfile(Base):
     name_updated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
     sector: Mapped[str | None] = mapped_column(nullable=True)
     industry: Mapped[str | None] = mapped_column(nullable=True)
+    sector_jp: Mapped[str | None] = mapped_column(nullable=True)
     business_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_updated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
 
