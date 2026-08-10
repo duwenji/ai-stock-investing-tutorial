@@ -17,11 +17,11 @@
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
 | UI                 | Streamlit（`st.tabs` による7タブ切替 + `st.dialog` の銘柄詳細モーダル、単一プロセス）。`app.py` は起動処理とタブ生成のみを担い、各タブの描画は `app_tabs/` 配下のモジュールに分割 |
 | データ処理         | pandas / numpy                                                                                             |
-| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`st.iframe`でパン・ズーム可能に埋め込み） |
+| チャート描画       | Altair（`st.altair_chart`。ローソク足＋出来高チャート＋移動平均線（5/25/75日）、業種間相関・ウェーブレット分析・バックテストのグリッドサーチ結果ヒートマップ。streamlit経由の間接依存） / Mermaid（業種間ネットワーク図。CDN読み込みの`mermaid.js`+`svg-pan-zoom.js`を`st.iframe`でパン・ズーム可能に埋め込み） |
 | 株価・ニュース取得 | yfinance                                                                                                   |
 | 日本語銘柄名取得   | Yahoo!ファイナンス日本版のHTMLタイトルを`requests` でスクレイピング                                      |
 | LLM                | Claude Code CLI（`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt)`）            |
-| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列）    |
+| 並列処理           | `concurrent.futures.ThreadPoolExecutor`（`common/concurrency.py`の`map_concurrently`、最大8並列。`portfolio_management/backtest.py`の`run_universe_backtest_ranking`も銘柄ごとの近傍グリッドサーチを同様に最大8並列で実行するが、Streamlit非依存を保つため`map_concurrently`は経由せず直接`ThreadPoolExecutor`を使う）    |
 | ウェーブレット分析 | PyWavelets（`pywt.cwt`、複素モルレーウェーブレット`cmor1.5-1.0`によるクロスウェーブレット・コヒーレンス計算） |
 | パッケージ管理     | uv（Python 3.14系）                                                                                        |
 | テスト             | pytest（yfinance・`call_llm` はモック化）                                                                |
@@ -72,8 +72,10 @@ app/
     review.py                    # generate_portfolio_review（事実データ統合＋LLM考察生成）
     storage.py                   # load_holdings / save_holdings（JSON永続化）
     ticker_names.py               # build_candidate_names（ユニバース名＋未知銘柄の名前解決）
-    backtest.py                   # 戦略4種の実装、STRATEGIES定義、比較・ランキング関数、
-                                   # generate_backtest_explanation（Prompt Chaining: 結果解説→改善提案の2段階）
+    backtest.py                   # 戦略4種の実装、STRATEGIES定義（param_grid/fixed_params）、
+                                   # 近傍グリッドサーチ（run_grid_search）・安定性判定（summarize_grid_stability）・
+                                   # 一括ランキング関数、generate_backtest_explanation
+                                   # （Prompt Chaining: 結果解説→改善提案の2段階）
   strategy_builder/
     conditions.py                  # apply_strategy_conditions, sort_by_strategy, build_match_reason
                                     # （indicator/operatorスキーマ、screening.pyのfield/記号演算子スキーマとは別）
@@ -83,7 +85,7 @@ app/
     sector_insight.py              # build_watchlist_from_rotation（業種ローテーションからの銘柄提案）
     storage.py                     # load_strategies / save_strategy（strategies.json永続化）
   screening/
-    universe.py                   # 固定スクリーニング/バックテスト対象ユニバース（226銘柄＝日経225と既存銘柄の和集合、日本語名付き）
+    universe.py                   # 固定スクリーニング/バックテスト対象ユニバース（228銘柄＝日経225と既存銘柄の和集合、日本語名付き）
     sectors.py                    # SECTOR_MAP（UNIVERSE銘柄→東証17業種区分）
   sector_analysis/
     correlation.py                # compute_sector_returns, compute_lead_lag_pairs（業種別リターン・時差相関計算）
@@ -311,9 +313,9 @@ flowchart TB
 | # | タブ                   | 概要                                                                                                                           |
 | - | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 1 | ポートフォリオ         | 保有銘柄を登録し、構成比・損益・リスク・ファンダメンタル・テクニカル・ニュースセンチメントを統合したレビューレポートを生成する |
-| 2 | スクリーニング         | 自然言語の投資条件をAIがフィルタ条件（JSON、per/pbr/dividend_yield_pct/sectorに対応）に変換し、確認後にUNIVERSE 226銘柄から絞り込む |
+| 2 | スクリーニング         | 自然言語の投資条件をAIがフィルタ条件（JSON、per/pbr/dividend_yield_pct/sectorに対応）に変換し、確認後にUNIVERSE 228銘柄から絞り込む |
 | 3 | バックテスト           | 指定銘柄に対し4戦略について近傍グリッドサーチ（15〜40通り）でベクトル化バックテストを実行し、ヒートマップと安定性チェック（変動係数）を表示したうえで、AIによる結果解説と改善提案の2段階（Prompt Chaining）を表示する |
-| 4 | 一括バックテスト       | UNIVERSE 226銘柄＋保有銘柄に対し、選択した戦略について銘柄ごとに近傍グリッドサーチで最良パラメータを探索して一括バックテストし、リスク調整済みリターン順にランキング表示する               |
+| 4 | 一括バックテスト       | UNIVERSE 228銘柄＋保有銘柄に対し、選択した戦略について銘柄ごとに近傍グリッドサーチで最良パラメータを探索して一括バックテストし、リスク調整済みリターン順にランキング表示する               |
 | 5 | セクターローテーション | UNIVERSE銘柄を東証17業種に分類し、業種間の値動きの時差相関（リード・ラグ）・全ペアネットワーク図・ウェーブレット分析（時間変化するリード・ラグ）を過去の株価データから計算して表示する。表示するセクションのON/OFF・順序・高さはユーザーが設定可能 |
 | 6 | AI戦略ビルダー         | 投資アイデアをAIとの対話で構造化条件（JSON）に詰め、確定候補は自動評価・改善ループ（Evaluator-Optimizer）を経てから確認・保存し、簡易バックテストと最新データでの銘柄選定までを一気通貫で行う |
 | 7 | AI質問箱               | 自由記述の投資質問をAIが5カテゴリに分類し（Routing）、専用の分析エージェントへ振り分けて回答する |
@@ -393,7 +395,7 @@ sequenceDiagram
 #### ステップ・分岐の説明
 
 1. **保有銘柄の読み込み**: セッション初回のみ `load_holdings()` を呼ぶ。ファイルが無い、または壊れている（JSON decode失敗）場合は空リストにフォールバックし、初期行 `{"ticker": "", "shares": 0, "cost": 0.0}` を1件表示する。
-2. **銘柄名候補の構築**: `UNIVERSE_NAMES`（226銘柄）に加え、保有銘柄のうちユニバース外のティッカーは `fetch_japanese_name` で名前解決する。この関数は `app_tabs/shared.py` の `cached_fetch_japanese_name`（`st.cache_data(ttl=24h)`）でラップされており、同一ティッカーへの重複リクエストを抑制する。
+2. **銘柄名候補の構築**: `UNIVERSE_NAMES`（228銘柄）に加え、保有銘柄のうちユニバース外のティッカーは `fetch_japanese_name` で名前解決する。この関数は `app_tabs/shared.py` の `cached_fetch_japanese_name`（`st.cache_data(ttl=24h)`）でラップされており、同一ティッカーへの重複リクエストを抑制する。
 3. **銘柄の検索・追加**: セレクトボックスで `"ティッカー 銘柄名"` の形式から選び、「追加」ボタン押下時のみ `session_state["holdings_rows"]` に反映する。**既に一覧にあるティッカー**を選んだ場合は追加せず `st.info` で通知する（分岐）。
 4. **編集・保存**: `st.data_editor` は行の追加・削除・編集を許可する（`num_rows="dynamic"`）。「保存」ボタンを押すまでファイルには反映されず、ティッカーが空の行は保存時に除外される。
 5. **銘柄詳細ダイアログ**: 保存済み保有銘柄ごとに「詳細」ボタンが並び（`key=f"portfolio_detail_{i}_{ticker}"` で行インデックスをキーに含め、同一ティッカー重複時もボタンキーが衝突しないようにしている）、押下すると [4.6](#46-銘柄詳細ダイアログクロスタブ機能) のダイアログが開く。
@@ -433,7 +435,7 @@ sequenceDiagram
     else パース成功
         UI-->>User: st.json(filters) で解釈結果を表示（適用前確認）
         User->>UI: 「この条件で絞り込む」
-        UI->>PriceAPI: fetch_universe_fundamentals(UNIVERSE(226銘柄), cache_dir)
+        UI->>PriceAPI: fetch_universe_fundamentals(UNIVERSE(228銘柄), cache_dir)
         PriceAPI->>Cache: read_cache(universe-<hash>)
         alt 当日分キャッシュあり
             Cache-->>PriceAPI: キャッシュ済みfundamentals
@@ -459,7 +461,7 @@ sequenceDiagram
 1. **条件のフィルタ変換**: `build_screening_prompt` は使用可能なfieldを `per` / `pbr` / `dividend_yield_pct` / `sector`（業種）の4つに限定するようプロンプト内で明示し、LLMにJSON配列のみを出力させる。`sector` を使う場合の `operator` は `==` のみとし、`value` は `SECTOR_MAP` の値（東証17業種区分）から表記ゆれを吸収して選ばせる。
 2. **パース失敗時の分岐**: `strip_code_fence`（```json フェンス除去）後に `json.loads` が失敗すると `st.error` を出し、以降の絞り込み処理には進まない（ユーザーに条件の言い換えを促す）。
 3. **確認ステップ（誤解釈対策）**: 解釈結果は `st.json` で必ず画面表示し、**「この条件で絞り込む」ボタンを押すまで実データには一切適用しない**。これによりAIの誤変換に早期に気づける。
-4. **ユニバースfundamentalsの取得**: `fetch_universe_fundamentals` はUNIVERSE 226銘柄のティッカー集合のハッシュをキーに、**当日分**キャッシュがあれば再利用する（起動のたびに226回yfinance呼び出しをしない）。キャッシュミス時は `common/concurrency.py::map_concurrently` で最大8並列に取得し、個別銘柄の取得で例外が発生した場合はその銘柄を結果からスキップして処理を続ける（フィルタ対象の減少のみで処理全体は止めない）。`fetch_fundamentals` の日本語銘柄名は精度が低いため、`name` 列は `UNIVERSE_NAMES` の日本語名で上書き補完し、`sector` 列は `SECTOR_MAP` から付加する。
+4. **ユニバースfundamentalsの取得**: `fetch_universe_fundamentals` はUNIVERSE 228銘柄のティッカー集合のハッシュをキーに、**当日分**キャッシュがあれば再利用する（起動のたびに228回yfinance呼び出しをしない）。キャッシュミス時は `common/concurrency.py::map_concurrently` で最大8並列に取得し、個別銘柄の取得で例外が発生した場合はその銘柄を結果からスキップして処理を続ける（フィルタ対象の減少のみで処理全体は止めない）。`fetch_fundamentals` の日本語銘柄名は精度が低いため、`name` 列は `UNIVERSE_NAMES` の日本語名で上書き補完し、`sector` 列は `SECTOR_MAP` から付加する。
 5. **フィルタ適用**: `apply_filters` は条件を1件ずつ順番にAND条件で適用する。`field` がDataFrameの列に存在しない、または `operator` が `<=`/`>=`/`<`/`>`/`==` のいずれでもない場合は**その条件だけを無視**して次の条件に進む（フィルタ全体を失敗させない防御的実装）。値が `None`（`NaN`）の行は `notna()` チェックで除外される。
 6. **絞り込み結果テーブル**: `ticker`/`name`/`sector`/`per`/`pbr`/`dividend_yield_pct` に加え `market_cap`（時価総額）列も表示する。テーブルは `on_select="rerun"`・`selection_mode="single-row"` でクリック可能になっており、行を選ぶと [4.6](#46-銘柄詳細ダイアログクロスタブ機能) の銘柄詳細ダイアログが開く。
 7. **AIコメント生成**: 絞り込み結果が0件なら `generate_screening_comments` は空dictを返しLLM呼び出し自体を行わない。0件でない場合は該当銘柄すべてをまとめた**1回のプロンプト**でコメントを一括生成し、JSONパースに失敗した場合は全銘柄に対し「コメント生成失敗」を表示する。
@@ -555,7 +557,7 @@ sequenceDiagram
     User->>UI: 戦略・取得期間・取引コスト有無を選択
     User->>UI: 「一括バックテストを実行」
     UI->>Storage: load_holdings()
-    UI->>UI: target_tickers = UNIVERSE(226) ∪ 保有銘柄
+    UI->>UI: target_tickers = UNIVERSE(228) ∪ 保有銘柄
     UI->>UI: cache_key = "universe-backtest-" + sha256(strategy-period-cost-tickers)[:12]
     UI->>Cache: read_cache(cache_key)（force_regenerateなら省略）
     alt キャッシュあり
@@ -591,7 +593,7 @@ sequenceDiagram
 
 #### ステップ・分岐の説明
 
-1. **対象銘柄の決定**: `UNIVERSE`（226銘柄）と現在の保有銘柄ティッカーの**和集合**を対象にする。保有銘柄がユニバース外でも対象に含まれる。
+1. **対象銘柄の決定**: `UNIVERSE`（228銘柄）と現在の保有銘柄ティッカーの**和集合**を対象にする。保有銘柄がユニバース外でも対象に含まれる。
 2. **キャッシュ判定**: `"universe-backtest-"` + `strategy-period-cost-対象銘柄一覧` のハッシュをキーにする。**対象銘柄の集合が変わる**（保有銘柄の増減やUNIVERSEの更新）だけでもキャッシュキーが変わり再計算される。
 3. **株価取得の並列化とエラーハンドリング**: `map_concurrently` で対象銘柄すべてを最大8並列に取得する（進捗バーは銘柄単位の逐次表示ではなく、並列バッチ全体を覆う単一の `st.spinner`）。取得中に例外が発生した銘柄、または空データだった銘柄は `skipped_tickers` に記録して処理を継続する。全銘柄が取得失敗した場合のみ致命的エラーとして扱う。
 4. **銘柄ごとに近傍グリッドで最良パラメータを探索**: 単一銘柄バックテストと同様の `param_grid`/`fixed_params` を使い、銘柄ごとに全組み合わせをバックテストして `risk_adjusted_return` が最大の組み合わせを採用する（計算は `ThreadPoolExecutor` で最大8並列）。個別銘柄のグリッドサーチで例外が発生した場合はログに記録しその銘柄をランキングから除外する。
@@ -625,7 +627,7 @@ sequenceDiagram
     alt キャッシュあり かつ 新スキーマ（sector_returns/network_pairsを含む）
         Cache-->>UI: payload（pairs/skipped_tickers/excluded_sectors/comments/sector_returns/network_pairs）
     else キャッシュなし or 旧スキーマ（sector_returns/network_pairs未保存）
-        UI->>PriceAPI: map_concurrently(UNIVERSE(226), cached_fetch_price_history) 最大8並列
+        UI->>PriceAPI: map_concurrently(UNIVERSE(228), cached_fetch_price_history) 最大8並列
         loop UNIVERSE銘柄ごと（結果集約）
             alt 例外発生 or 空データ
                 UI->>UI: skipped_tickersへ追加
@@ -657,9 +659,9 @@ sequenceDiagram
 
 #### ステップ・分岐の説明（分析実行）
 
-1. **業種マッピング**: `screening/sectors.py::SECTOR_MAP` はUNIVERSE全226銘柄を東証17業種区分に分類したdict。JPX公式全銘柄一覧（`docs/data_j.xls`）の「17業種区分」列から抽出し、`data_j.xls` に未収録の1銘柄（`543A.T`）のみ手動で業種を割り当てている。UNIVERSE更新時は本ファイルも合わせて更新する必要がある（コード先頭コメントに明記）。
+1. **業種マッピング**: `screening/sectors.py::SECTOR_MAP` はUNIVERSE全228銘柄を東証17業種区分に分類したdict。JPX公式全銘柄一覧（`docs/data_j.xls`）の「17業種区分」列から抽出し、`data_j.xls` に未収録の1銘柄（`543A.T`）のみ手動で業種を割り当てている。UNIVERSE更新時は本ファイルも合わせて更新する必要がある（コード先頭コメントに明記）。
 2. **キャッシュ判定**: `"sector-rotation-"` + `期間-UNIVERSE集合` のハッシュをキーにする。`force_regenerate` チェックボックスがオンなら読み込みをスキップする。キャッシュヒットしても `payload` に `sector_returns` または `network_pairs` キーが無い場合（ネットワーク図・ウェーブレット分析の追加前に生成された旧スキーマ）は無視して再計算する。
-3. **株価取得**: UNIVERSE全226銘柄を `map_concurrently` で最大8並列に取得する（`cached_fetch_price_history` 経由で `st.cache_data(ttl=30分)` も併用）。取得失敗・空データの銘柄は `skipped_tickers` に記録し処理を継続、全滅時のみエラー表示。
+3. **株価取得**: UNIVERSE全228銘柄を `map_concurrently` で最大8並列に取得する（`cached_fetch_price_history` 経由で `st.cache_data(ttl=30分)` も併用）。取得失敗・空データの銘柄は `skipped_tickers` に記録し処理を継続、全滅時のみエラー表示。
 4. **業種別リターンの計算（`compute_sector_returns`）**: 業種ごとに構成銘柄の日次リターン（`pct_change`）を等ウエイト平均する。`prices_by_ticker` に存在しない（取得失敗）銘柄はスキップし、構成銘柄が1件も取得できなかった業種は `sector_returns` から丸ごと除外される。除外された業種は `excluded_sectors`（`SECTOR_MAPの全業種 − sector_returnsのキー`）として記録され、画面下部に一覧表示する。
 5. **リード・ラグ相関の計算（`compute_lead_lag_pairs`）**: 業種の全ペア（重複なし）について、`-20〜+20営業日` の範囲でラグをずらしながら相関係数を計算し、絶対値が最大となるラグを採用する。共通の非欠損日数が `max_lag_days`（20）未満のペアは結果から除外する。`lag > 0` は「一方の業種の過去の値がもう一方の現在値と相関する＝過去側の業種が先行（リード）、現在側が追随（ラグ）」と解釈し、`leading_sector`/`lagging_sector`/`lag_days`/`correlation` を持つdictのリストを、相関の絶対値降順で返す。
 6. **全ペアのウェーブレット集約（`compute_all_pairs_dominant_lag`）**: 業種の全組み合わせ（17業種なら136ペア）について `compute_cross_wavelet_lead_lag`（後述）を実行し、周期帯（短期/中期/長期）ごとに直近20営業日分のコヒーレンス加重平均ラグへ集約する。個別ペアで例外が発生した場合、またはデータ不足で空の結果になった場合はそのペア・周期帯を結果からスキップし、処理全体は継続する。結果はネットワーク図の描画に使う `network_pairs` としてキャッシュされる。
@@ -855,7 +857,7 @@ sequenceDiagram
 4. **確定候補の自動評価・改善（Evaluator-Optimizer、`strategy_builder/evaluation.py`）**: `kind: "strategy"`と判定された直後、`run_evaluation_loop`を1回だけ実行する。評価基準は (a) 条件が具体的か (b) 対象銘柄が0件になりそうな過度な絞り込みでないか (c) 断定的な投資助言表現を含まないか、の3点で、`evaluate_strategy`がJSONパースに失敗、または`pass`キーを含まない場合は安全側に倒し不合格として扱う。不合格時は`build_refinement_prompt`（対話ペルソナ指示は使わない軽量プロンプト）で修正案を生成し、応答が無効なJSON、または`conditions`キーを欠く場合はそのイテレーションをスキップし直前の候補のまま次の評価に進む。最大3イテレーションで打ち切り、最後の評価の後には改善案を生成しない（無駄な`call_llm`を避ける）。
 5. **確認ステップ（Verification、既存の確認UIとの統合）**: 評価・改善ループ後の最終案を`st.json`で表示する（`iterations > 0`の場合は「AIによる自動改善を行いました。」というキャプションと評価フィードバックを追加表示）。**「この条件で確定する」ボタンを押すまで`strategies.json`には一切保存されない**。「さらに対話を続ける」を選んだ場合は候補・評価結果をクリアし対話を継続する。
 6. **保存済み戦略の読み込み**: `load_strategies`で`strategies.json`から一覧を取得し、選択後「この戦略を読み込む」を押すと`strategy_confirmed`に直接反映される（この経路は既に確定・保存済みのためEvaluator-Optimizerループを経由しない）。
-7. **③バックテスト検証**: `strategy_confirmed`（②で確定、または読み込んだ戦略）が無ければ実行不可。`apply_strategy_conditions`でUNIVERSE 226銘柄を現在の財務指標で絞り込み、該当銘柄群を`run_strategy_backtest`（各銘柄をその銘柄自身の開始日=100に正規化して均等配分・保有した場合の資産推移）でシミュレーションする。過去の各時点で同条件を満たしていたかは考慮しないため**先読みバイアスを含む**旨をキャプションと免責事項で明示する。
+7. **③バックテスト検証**: `strategy_confirmed`（②で確定、または読み込んだ戦略）が無ければ実行不可。`apply_strategy_conditions`でUNIVERSE 228銘柄を現在の財務指標で絞り込み、該当銘柄群を`run_strategy_backtest`（各銘柄をその銘柄自身の開始日=100に正規化して均等配分・保有した場合の資産推移）でシミュレーションする。過去の各時点で同条件を満たしていたかは考慮しないため**先読みバイアスを含む**旨をキャプションと免責事項で明示する。
 8. **④最新データでの銘柄選定**: `apply_strategy_conditions`→`sort_by_strategy`→`build_match_reason`（LLMを呼ばず条件と実測値から機械的に判定理由を組み立てる、決定的な処理）の順に実行し、結果テーブルは行クリックで銘柄詳細ダイアログ（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)）を開ける。選定銘柄が属する業種のネットワーク図（[4.5 セクターローテーション](#45-セクターローテーション)のネットワーク図と同じ`build_mermaid_lead_lag_graph`を再利用）も表示する。
 
 ---
@@ -971,9 +973,9 @@ data/
 | セクターローテーション表示設定 | `data/sector_display_settings.json`                  | JSON文字列`{"visible": {...}, "order": {...}, "height": {...}}`（セクションキーごとのbool/int/int）                                                     | セクターローテーションタブ「表示設定」expander（`sector_analysis/display_settings.py`） |
 | 保存済み戦略                   | `data/strategies.json`                                | `[{"strategy_name", "conditions", "sort_by", "order"}, ...]`。同名戦略は上書き                                                                             | AI戦略ビルダータブ「この条件で確定する」（`strategy_builder/storage.py`） |
 | ポートフォリオレビュー結果     | `data/cache/YYYY-MM-DD-portfolio-review-<hash>.txt`  | JSON文字列`{"report", "news_by_ticker", "news_sentiment_by_ticker"}`。キーは保有銘柄の `ticker:shares:cost` 連結のSHA256先頭12桁                       | ポートフォリオタブ「レビューを生成」                 |
-| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象226銘柄集合のSHA256先頭12桁                                                                                         | スクリーニングタブ（絞り込み実行時）                 |
+| ユニバースfundamentals         | `data/cache/YYYY-MM-DD-universe-<hash>.txt`          | DataFrameをJSON化した文字列。キーは対象228銘柄集合のSHA256先頭12桁                                                                                         | スクリーニングタブ（絞り込み実行時）                 |
 | 単一銘柄バックテスト解説       | `data/cache/YYYY-MM-DD-backtest-<hash>.txt`          | 解説文＋改善提案（プレーンテキスト、Prompt Chaining Step1・Step2を結合した1つの文字列）。キーは戦略名・銘柄・期間・取引コストのSHA256先頭12桁             | バックテストタブ「バックテストを実行」               |
-| 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments", "preset_label"}`。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                      | 一括バックテストタブ「一括バックテストを実行」       |
+| 一括バックテストランキング     | `data/cache/YYYY-MM-DD-universe-backtest-<hash>.txt` | JSON文字列`{"ranking_rows", "skipped_tickers", "comments"}`。`ranking_rows`の各行は銘柄ごとに探索された`best_params`・`stability_cv`・`is_stable`を含む。キーは戦略・期間・コスト・対象銘柄一覧のSHA256先頭12桁                      | 一括バックテストタブ「一括バックテストを実行」       |
 | セクターローテーション分析結果 | `data/cache/YYYY-MM-DD-sector-rotation-<hash>.txt`   | JSON文字列`{"pairs", "skipped_tickers", "excluded_sectors", "comments", "sector_returns", "network_pairs"}`。キーは期間・UNIVERSE集合のSHA256先頭12桁。`sector_returns`は業種別日次リターン系列（ウェーブレット分析の再計算元）、`network_pairs`は全ペア×周期帯の支配的ラグ集約（ネットワーク図の描画元） | セクターローテーションタブ「分析を実行」             |
 | ウェーブレット分析AI解説       | `data/cache/YYYY-MM-DD-wavelet-comment-<hash>.txt`   | 解説文（プレーンテキスト）。キーは業種A・業種B・取得期間・周期帯のSHA256先頭12桁                                                                           | ウェーブレット分析セクション「AI解説を生成」         |
 | 銘柄詳細情報                   | `data/cache/YYYY-MM-DD-stock-detail-<ticker>.txt`    | JSON文字列`{"ticker", "name", "price_history"(OHLCV), "fundamentals", "technical", "news", "comment"}`。キーはハッシュ化せず**ティッカーそのまま** | 銘柄詳細ダイアログ（`stock_detail/detail.py`）     |
@@ -1007,6 +1009,7 @@ data/
 | 個別銘柄の株価データ取得失敗（ポートフォリオ）         | `map_concurrently` が例外を捕捉、その銘柄の`current_prices`/`price_histories` を欠落させたまま処理継続 |
 | 個別銘柄のfundamentals取得失敗（スクリーニング）       | `fetch_universe_fundamentals` 内で該当銘柄を結果からスキップし処理継続                                     |
 | 個別銘柄の株価データ取得失敗（一括バックテスト）       | `skipped_tickers` に記録し処理継続、全滅時のみエラー表示                                                   |
+| 個別銘柄のグリッドサーチ計算失敗（一括バックテスト）   | `logger.exception` でログに記録し、その銘柄をランキング結果から除外して処理継続（`run_universe_backtest_ranking`） |
 | 個別銘柄の株価データ取得失敗（セクターローテーション） | `skipped_tickers` に記録、構成銘柄が全滅した業種は `excluded_sectors` に記録、全滅時のみエラー表示       |
 | ペア単位のウェーブレット集約失敗（ネットワーク図データ計算） | `compute_all_pairs_dominant_lag` 内で該当ペア・周期帯を結果からスキップし処理継続                        |
 | ネットワーク図でコヒーレンス閾値を満たすペアが0件      | `build_mermaid_lead_lag_graph` が`None`を返し、「十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。」と表示 |
@@ -1032,4 +1035,4 @@ data/
 - MCPサーバー経由でのデータ取得への置き換え
 - レポートのメール/Slack自動送信
 - 複数ユーザー対応・認証
-- UNIVERSE（日経225構成銘柄、現在226銘柄）の定期的な見直し・入れ替え反映（`screening/universe.py` に実装時点＝2026年7月時点のスナップショットである旨のコメントあり。日経225の定期見直し・臨時入れ替えに追従する仕組みは未実装で、公式発表との定期照合が手作業前提。銘柄追加時は `screening/sectors.py::SECTOR_MAP` の追随更新も手作業）
+- UNIVERSE（日経225構成銘柄、現在228銘柄）の定期的な見直し・入れ替え反映（`screening/universe.py` に実装時点＝2026年7月時点のスナップショットである旨のコメントあり。日経225の定期見直し・臨時入れ替えに追従する仕組みは未実装で、公式発表との定期照合が手作業前提。銘柄追加時は `screening/sectors.py::SECTOR_MAP` の追随更新も手作業）
