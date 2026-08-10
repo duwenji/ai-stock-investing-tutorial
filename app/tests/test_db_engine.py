@@ -99,6 +99,7 @@ def test_price_history_unique_constraint_on_ticker_and_date(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
+        session.add(CompanyProfile(ticker="A"))
         session.add(
             PriceHistory(ticker="A", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1)
         )
@@ -120,10 +121,63 @@ def test_fundamentals_snapshot_unique_constraint_on_ticker_and_date(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
+        session.add(CompanyProfile(ticker="A"))
         session.add(FundamentalsSnapshot(ticker="A", snapshot_date="2026-01-01"))
         session.commit()
 
         session.add(FundamentalsSnapshot(ticker="A", snapshot_date="2026-01-01"))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_price_history_ticker_foreign_key_enforced(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            PriceHistory(
+                ticker="NOPROFILE.T",
+                date="2026-01-01",
+                open=1,
+                high=1,
+                low=1,
+                close=1,
+                volume=1,
+            )
+        )
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_fundamentals_snapshot_ticker_foreign_key_enforced(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(FundamentalsSnapshot(ticker="NOPROFILE.T", snapshot_date="2026-01-01"))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_ticker_news_ticker_foreign_key_enforced(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(TickerNews(ticker="NOPROFILE.T", title="t", publisher="p", link="https://x/1"))
         try:
             session.commit()
             assert False, "IntegrityErrorが発生するはず"

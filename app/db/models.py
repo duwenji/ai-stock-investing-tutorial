@@ -66,7 +66,9 @@ class PriceHistory(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(
+        ForeignKey("company_profiles.ticker"), nullable=False, index=True
+    )
     date: Mapped[str] = mapped_column(nullable=False)
     open: Mapped[float] = mapped_column(nullable=False)
     high: Mapped[float] = mapped_column(nullable=False)
@@ -82,7 +84,9 @@ class FundamentalsSnapshot(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(
+        ForeignKey("company_profiles.ticker"), nullable=False, index=True
+    )
     snapshot_date: Mapped[str] = mapped_column(nullable=False)
     name: Mapped[str | None] = mapped_column(nullable=True)
     trailing_pe: Mapped[float | None] = mapped_column(nullable=True)
@@ -112,7 +116,9 @@ class TickerNews(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(
+        ForeignKey("company_profiles.ticker"), nullable=False, index=True
+    )
     title: Mapped[str | None] = mapped_column(nullable=True)
     publisher: Mapped[str | None] = mapped_column(nullable=True)
     link: Mapped[str | None] = mapped_column(nullable=True)
