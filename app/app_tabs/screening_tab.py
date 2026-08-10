@@ -8,14 +8,12 @@ import streamlit as st
 from common.json_parsing import strip_code_fence
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm
-from data_api.stock_price_api import fetch_universe_fundamentals
+from data_api.stock_price_api import fetch_universe_fundamentals, load_all_company_profiles
 from prompt_patterns.screening import (
     apply_filters,
     build_screening_prompt,
     generate_screening_comments,
 )
-from screening.sectors import SECTOR_MAP
-from screening.universe import UNIVERSE, UNIVERSE_NAMES
 
 from app_tabs.shared import handle_table_selection
 
@@ -25,6 +23,13 @@ logger = logging.getLogger(__name__)
 def render_screening_tab() -> None:
     logger.info("スクリーニングタブを表示")
     st.header("銘柄スクリーニング")
+
+    company_profiles = load_all_company_profiles()
+    tickers = [p["ticker"] for p in company_profiles]
+    names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
+    sector_jp_by_ticker = {
+        p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
+    }
 
     condition_text = st.text_input(
         "スクリーニング条件を自然言語で入力してください",
@@ -36,7 +41,7 @@ def render_screening_tab() -> None:
         # 構造化フィルタ（JSON）に変換する。変わっていなければ結果をセッションから再利用する
         if st.session_state.get("screening_condition_text") != condition_text:
             prompt = build_screening_prompt(
-                condition_text, sectors=sorted(set(SECTOR_MAP.values()))
+                condition_text, sectors=sorted(set(sector_jp_by_ticker.values()))
             )
             raw_filters = call_llm(prompt)
             st.session_state["screening_condition_text"] = condition_text
@@ -58,14 +63,14 @@ def render_screening_tab() -> None:
             st.subheader("AIが解釈した条件（適用前に確認してください）")
             st.json(filters)
 
-            # ユニバース銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
+            # 対象銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
             if st.button("この条件で絞り込む"):
                 with log_duration(logger, "スクリーニング絞り込み実行"):
-                    universe_df = fetch_universe_fundamentals(UNIVERSE)
-                    universe_df["name"] = universe_df["ticker"].map(UNIVERSE_NAMES).fillna(
+                    universe_df = fetch_universe_fundamentals(tickers)
+                    universe_df["name"] = universe_df["ticker"].map(names_by_ticker).fillna(
                         universe_df["name"]
                     )
-                    universe_df["sector"] = universe_df["ticker"].map(SECTOR_MAP)
+                    universe_df["sector"] = universe_df["ticker"].map(sector_jp_by_ticker)
                     result_df = apply_filters(universe_df, filters)
                     comments = generate_screening_comments(result_df, call_llm=call_llm)
                     # 時価総額は円単位だと桁が大きく読みにくいため、表示用に億円単位へ変換する
