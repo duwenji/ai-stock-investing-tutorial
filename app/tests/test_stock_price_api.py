@@ -118,6 +118,7 @@ def test_fetch_price_history_refetches_when_stale(monkeypatch, tmp_path):
 
     old_date = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
     with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
         session.add(
             stock_price_api.PriceHistory(
                 ticker="7203.T", date=old_date, open=1, high=1, low=1, close=1, volume=1
@@ -662,6 +663,7 @@ def test_load_price_history_for_ticker_returns_rows_sorted_by_date(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
         session.add(
             stock_price_api.PriceHistory(
                 ticker="7203.T", date="2026-01-02", open=2, high=2, low=2, close=2, volume=2
@@ -772,6 +774,7 @@ def test_load_fundamentals_snapshots_for_ticker_returns_all_fields(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
+        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
         session.add(
             stock_price_api.FundamentalsSnapshot(
                 ticker="7203.T", snapshot_date="2026-01-01", trailing_pe=12.3, market_cap=1000
