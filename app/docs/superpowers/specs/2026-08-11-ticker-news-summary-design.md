@@ -10,7 +10,8 @@ yfinance の実レスポンスを確認したところ、`ticker.news` の各記
 
 - リンク先ページの全文スクレイピング（サイトごとにHTML構造が異なり壊れやすく、著作権・利用規約上のリスクもあるため見送る）。
 - 既存に蓄積済みの `ticker_news` 行への `summary` バックフィル（`_insert_new_ticker_news` は既知の記事を重複判定でスキップするため、既存行は再取得されない。今後の新規記事から自然に蓄積される想定で、遡及的なバックフィルは行わない）。
-- `summary` の要約・翻訳・トリミング（後述の通り全文をそのまま保存・利用する）。
+- `summary` のトリミング（AIプロンプトへは全文そのまま含める。ユーザー確認済み）。
+- `summary` のDB保存時・AIプロンプト投入時の翻訳（英語のまま保存・利用する。LLMは英語入力を読んで日本語で出力できるため、AIコメント/Q&A回答の生成には翻訳不要。翻訳が必要なのは人が読む画面表示のみで、D節で対応する）。
 
 ## A. DBスキーマ
 
@@ -70,7 +71,28 @@ yfinance の実レスポンスを確認したところ、`ticker.news` の各記
 - `tests/test_stock_detail_prompt.py`: `summary` を含むニュースitemを渡した場合にプロンプト文字列に要約行が含まれること、`summary` が `None` の場合はその記事の要約行が出力されないことを検証するテストを追加する。
 - `tests/test_qa_routing.py`: 同様に `build_news_answer_prompt` について要約行の有無を検証するテストを追加する。
 
-## D. 画面表示
+## D. 要約の日本語訳（画面表示専用）
+
+### 現状
+
+`summary` は英文のまま。AIコメント/Q&A回答用プロンプト（C節）はLLMが英語を読んで日本語で出力するため翻訳不要だが、画面に英文のまま表示するのはユーザーにとって読みにくい。既存コードには類似パターンとして、`stock_detail/detail.py` の `generate_stock_detail` が `company_profile.get("business_summary")`（英文）を `build_company_profile_prompt` 経由で `call_llm` に渡し、日本語の講評コメント（`profile_comment`）を生成してキャッシュ済みペイロードに含めている例がある。
+
+### 変更内容
+
+`prompt_patterns/stock_detail.py` に `build_news_summary_translation_prompt(summaries: list[str]) -> str` を追加する。複数の英文要約を渡し、「各要約を日本語に翻訳し、区切り文字 `@@@` を1行だけ挟んで、入力と同じ順序・同じ件数で出力してください（翻訳文以外は出力しないこと）」という指示のプロンプトを組み立てる。
+
+`stock_detail/detail.py` の `generate_stock_detail` で、`news = fetch_news(ticker)` の後に以下を行う:
+
+1. `news` のうち `summary` がある記事だけを抜き出し、その `summary` のリストを作る。1件も無ければ以降のLLM呼び出しはスキップする。
+2. `build_news_summary_translation_prompt` でプロンプトを組み立て、`call_llm` を1回呼ぶ（既存の `comment`/`profile_comment` 生成と同様、`generate_stock_detail` 全体の結果がキャッシュされるため、キャッシュヒット時はこの呼び出しも再実行されない）。
+3. 応答を `@@@` で分割し、件数が入力件数と一致する場合のみ、元の記事の順序に対応させて各記事に `summary_ja` を追加する。件数が一致しない場合（LLMが指示通りの件数を返さなかった場合）は `summary_ja` を追加せず、警告ログを出す（画面表示側は `summary_ja` が無ければ英文 `summary` にフォールバックする。E節参照）。
+
+### テスト
+
+- `tests/test_stock_detail_prompt.py`: `build_news_summary_translation_prompt` が要約リストと `@@@` 区切りの指示を含むプロンプトを生成することを検証する。
+- `tests/test_stock_detail.py`: `call_llm` をモックし、(a) `summary` を持つ記事がある場合に翻訳用の `call_llm` 呼び出しが行われ、応答が `@@@` で正しく分割されて各記事の `summary_ja` に反映されること、(b) `summary` を持つ記事が1件も無い場合は翻訳用の `call_llm` 呼び出しが行われないこと、(c) 応答の分割件数が入力件数と一致しない場合は `summary_ja` が設定されず処理が落ちないこと、を検証する。
+
+## E. 画面表示
 
 ### 現状
 
@@ -78,7 +100,7 @@ yfinance の実レスポンスを確認したところ、`ticker.news` の各記
 
 ### 変更内容
 
-各記事の見出し行はそのまま維持し、`item.get("summary")` がある場合は `st.expander("要約を見る")` を見出し行の下に追加し、展開すると `summary` 全文を表示する。`summary` が無い記事は現状通り見出し行のみ。
+各記事の見出し行はそのまま維持し、`item.get("summary_ja") or item.get("summary")` が取得できる場合は `st.expander("要約を見る")` を見出し行の下に追加し、展開すると（優先順位: 日本語訳 > 英文原文）その本文を表示する。どちらも無い記事は現状通り見出し行のみ。
 
 ### テスト
 
