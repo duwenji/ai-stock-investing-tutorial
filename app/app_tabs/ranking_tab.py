@@ -20,7 +20,7 @@ from screening.universe import UNIVERSE
 
 from app_tabs.shared import (
     CACHE_DIR,
-    HOLDINGS_PATH,
+    DEFAULT_USER_ID,
     cached_fetch_japanese_name,
     cached_fetch_price_history,
     handle_table_selection,
@@ -56,7 +56,7 @@ def render_ranking_tab() -> None:
         transaction_cost_pct = 0.1 if ranking_apply_cost else 0.0
 
         # 分析対象はユニバース銘柄と保有銘柄の和集合とする
-        holdings = load_holdings(HOLDINGS_PATH)
+        holdings = load_holdings(DEFAULT_USER_ID)
         holdings_tickers = [h["ticker"] for h in holdings if h.get("ticker")]
         target_tickers = sorted(set(UNIVERSE) | set(holdings_tickers))
 
@@ -124,7 +124,7 @@ def render_ranking_tab() -> None:
         ranking_strategy_label = st.session_state["ranking_strategy_label"]
 
         candidate_names = build_candidate_names(
-            load_holdings(HOLDINGS_PATH), resolve_name=cached_fetch_japanese_name
+            load_holdings(DEFAULT_USER_ID), resolve_name=cached_fetch_japanese_name
         )
         ranking_df = pd.DataFrame(payload["ranking_rows"])
         ranking_df["name"] = ranking_df["ticker"].map(candidate_names).fillna("")

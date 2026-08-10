@@ -28,12 +28,14 @@ from stock_detail.detail import generate_stock_detail
 
 logger = logging.getLogger(__name__)
 
-# 保有銘柄データやAPI取得結果のキャッシュを保存するディレクトリ構成
+# API取得結果のキャッシュを保存するディレクトリ構成
 APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
-HOLDINGS_PATH = DATA_DIR / "holdings.json"
-SECTOR_DISPLAY_SETTINGS_PATH = DATA_DIR / "sector_display_settings.json"
 CACHE_DIR = DATA_DIR / "cache"
+
+# フェーズ3（認証導入）で認証済みユーザーのIDに置き換えるまでの暫定値。
+# scripts/migrate_to_db.pyが作成する最初のユーザーのIDと一致する。
+DEFAULT_USER_ID = 1
 
 
 @st.cache_data(ttl=60 * 60 * 24)

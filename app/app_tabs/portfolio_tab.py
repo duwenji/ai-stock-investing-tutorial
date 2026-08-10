@@ -19,7 +19,7 @@ from portfolio_management.ticker_names import build_candidate_names
 
 from app_tabs.shared import (
     CACHE_DIR,
-    HOLDINGS_PATH,
+    DEFAULT_USER_ID,
     cached_analyze_fundamentals,
     cached_fetch_japanese_name,
     cached_fetch_news,
@@ -36,7 +36,7 @@ def render_portfolio_tab() -> None:
 
     # 初回表示時は保存済みの保有銘柄をロードする
     if "holdings_rows" not in st.session_state:
-        st.session_state["holdings_rows"] = load_holdings(HOLDINGS_PATH)
+        st.session_state["holdings_rows"] = load_holdings(DEFAULT_USER_ID)
 
     candidate_names = build_candidate_names(
         st.session_state["holdings_rows"], resolve_name=cached_fetch_japanese_name
@@ -117,14 +117,14 @@ def render_portfolio_tab() -> None:
                         "shares": new_shares,
                         "cost": new_cost,
                     }
-                    save_holdings(HOLDINGS_PATH, holdings)
+                    save_holdings(DEFAULT_USER_ID, holdings)
                     st.success("更新しました。")
                     st.rerun()
             with delete_col:
                 st.write("")
                 if st.button("削除"):
                     del holdings[selected_idx]
-                    save_holdings(HOLDINGS_PATH, holdings)
+                    save_holdings(DEFAULT_USER_ID, holdings)
                     st.session_state["portfolio_selected_row"] = None
                     st.rerun()
     else:

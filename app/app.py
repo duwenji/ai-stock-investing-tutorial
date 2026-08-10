@@ -13,6 +13,7 @@ import streamlit as st
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import setup_logging
 from data_api.llm_client import check_claude_cli_available
+from db.engine import engine, init_db
 
 from app_tabs.backtest_tab import render_backtest_tab
 from app_tabs.portfolio_tab import render_portfolio_tab
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 logger.info("app.pyを実行しました")
 
 st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
+
+init_db(engine)
 
 # Claude CLIが利用できない環境ではLLM機能が動作しないため、起動時点でチェックしてアプリを止める
 try:
