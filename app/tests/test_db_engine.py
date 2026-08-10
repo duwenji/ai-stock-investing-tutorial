@@ -248,6 +248,15 @@ def test_init_db_does_not_override_existing_admin_assignment(tmp_path):
         assert alice.is_admin is False  # 既にbobがadminなので上書きされない
 
 
+def test_create_db_engine_enables_sqlite_foreign_keys(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    with engine.connect() as connection:
+        value = connection.execute(text("PRAGMA foreign_keys")).scalar()
+    assert value == 1
+
+
 def test_init_db_column_addition_tolerates_concurrent_duplicate_add(tmp_path):
     """Streamlitのホットリロード等でinit_db()がほぼ同時に複数回実行され、
     片方がALTER TABLEで列を追加した直後にもう片方も同じ列を追加しようとする

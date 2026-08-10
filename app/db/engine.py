@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
@@ -14,15 +14,25 @@ DATA_DIR = APP_DIR / "data"
 DB_PATH = DATA_DIR / "app.db"
 
 
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def create_db_engine(db_url: str | None = None) -> Engine:
     """指定したdb_urlのエンジンを作成する。省略時は本番用のdata/app.dbを使う
     （その場合はDATA_DIRを作成してから接続する）。フェーズ2以降、複数銘柄の
     並行フェッチ（map_concurrently）が同時にDB書き込みを行うため、SQLiteの
-    書き込みロック競合時に即座にエラーにせず一定時間リトライ待機させる。"""
+    書き込みロック競合時に即座にエラーにせず一定時間リトライ待機させる。
+    SQLiteはデフォルトで外部キー制約を強制しないため、接続ごとにPRAGMAで
+    有効化する（price_history等のticker列に張ったFKを実効化するため）。"""
     if db_url is None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         db_url = f"sqlite:///{DB_PATH}"
-    return create_engine(db_url, connect_args={"timeout": 30})
+    engine = create_engine(db_url, connect_args={"timeout": 30})
+    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+    return engine
 
 
 def init_db(engine: Engine) -> None:
