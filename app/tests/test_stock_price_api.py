@@ -865,3 +865,95 @@ def test_save_company_profile_fields_updates_existing_row(tmp_path):
 
     profile = stock_price_api.load_company_profile("7203.T", session_factory=session_factory)
     assert profile["sector"] == "Consumer Cyclical"
+
+
+def test_fetch_price_history_creates_company_profile_stub_for_new_ticker(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+
+    with session_factory() as session:
+        assert session.get(stock_price_api.CompanyProfile, "7203.T") is not None
+
+
+def test_fetch_fundamentals_creates_company_profile_stub_for_new_ticker(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_fundamentals("7203.T", session_factory=session_factory)
+
+    with session_factory() as session:
+        assert session.get(stock_price_api.CompanyProfile, "7203.T") is not None
+
+
+def test_fetch_news_creates_company_profile_stub_for_new_ticker(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
+
+    with session_factory() as session:
+        assert session.get(stock_price_api.CompanyProfile, "7203.T") is not None
+
+
+def test_fetch_price_history_before_fetch_company_profile_does_not_violate_foreign_key(
+    monkeypatch, tmp_path
+):
+    """stock_detail.generate_stock_detailはfetch_price_historyをfetch_company_profileより
+    先に呼ぶため、その呼び出し順序でもFK違反にならないことを確認する。"""
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    profile = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    assert profile["sector"] == "Consumer Cyclical"
+
+
+def test_save_price_history_for_ticker_creates_company_profile_stub_for_new_ticker(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_price_history_for_ticker(
+        "9999.T",
+        [
+            {
+                "date": "2026-01-01",
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            }
+        ],
+        session_factory=session_factory,
+    )
+
+    with session_factory() as session:
+        assert session.get(stock_price_api.CompanyProfile, "9999.T") is not None
+
+
+def test_save_fundamentals_snapshots_for_ticker_creates_company_profile_stub_for_new_ticker(
+    tmp_path,
+):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.save_fundamentals_snapshots_for_ticker(
+        "9999.T",
+        [{"snapshot_date": "2026-01-01", "trailing_pe": 10.0}],
+        session_factory=session_factory,
+    )
+
+    with session_factory() as session:
+        assert session.get(stock_price_api.CompanyProfile, "9999.T") is not None
