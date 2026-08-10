@@ -33,8 +33,9 @@ def render_ranking_tab() -> None:
     logger.info("一括バックテストタブを表示")
     st.header("複数銘柄一括バックテスト・ランキング")
     st.caption(
-        "主要銘柄（UNIVERSE）と保有銘柄を対象に、選択した戦略の標準プリセットで"
-        "バックテストし、リスク調整済みリターン（累積リターン÷|最大ドローダウン|）の高い順に並べます。"
+        "主要銘柄（UNIVERSE）と保有銘柄を対象に、選択した戦略について銘柄ごとに"
+        "近傍グリッドサーチで最良パラメータを探索してバックテストし、リスク調整済み"
+        "リターン（累積リターン÷|最大ドローダウン|）の高い順に並べます。"
     )
 
     ranking_strategy = st.selectbox(
@@ -93,21 +94,21 @@ def render_ranking_tab() -> None:
                     st.error("バックテスト可能な銘柄がありませんでした。")
                     payload = None
                 else:
-                    # 標準プリセット（先頭のパラメータ組）で全銘柄を横並び比較しランキング化する
-                    standard_label, standard_params = strategy["presets"][0]
-                    ranking_rows = run_universe_backtest_ranking(
-                        prices_by_ticker,
-                        strategy["func"],
-                        standard_params,
-                        transaction_cost_pct=transaction_cost_pct,
-                        min_days=strategy["min_days"],
-                    )
+                    # 銘柄ごとに近傍グリッドサーチで最良パラメータを探索してランキング化する
+                    with st.spinner(f"パラメータを最適化中...（{len(prices_by_ticker)}銘柄）"):
+                        ranking_rows = run_universe_backtest_ranking(
+                            prices_by_ticker,
+                            strategy["func"],
+                            strategy["param_grid"],
+                            strategy.get("fixed_params"),
+                            transaction_cost_pct=transaction_cost_pct,
+                            min_days=strategy["min_days"],
+                        )
                     comments = generate_ranking_comments(ranking_rows[:5], call_llm=call_llm)
                     payload = {
                         "ranking_rows": ranking_rows,
                         "skipped_tickers": skipped_tickers,
                         "comments": comments,
-                        "preset_label": standard_label,
                     }
                     write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
@@ -127,6 +128,9 @@ def render_ranking_tab() -> None:
         )
         ranking_df = pd.DataFrame(payload["ranking_rows"])
         ranking_df["name"] = ranking_df["ticker"].map(candidate_names).fillna("")
+        ranking_df["best_params_text"] = ranking_df["best_params"].map(
+            lambda params: "、".join(f"{key}={value}" for key, value in params.items())
+        )
         ranking_df.insert(0, "順位", range(1, len(ranking_df) + 1))
         ranking_df = ranking_df[
             [
@@ -138,10 +142,11 @@ def render_ranking_tab() -> None:
                 "win_rate_pct",
                 "max_drawdown_pct",
                 "risk_adjusted_return",
+                "best_params_text",
             ]
         ]
 
-        st.subheader(f"{ranking_strategy_label}（{payload['preset_label']}）ランキング")
+        st.subheader(f"{ranking_strategy_label}（銘柄ごとに近傍グリッドで最適化）ランキング")
         st.caption("行をクリックすると銘柄詳細を表示します。")
         event = st.dataframe(
             ranking_df,
@@ -153,6 +158,7 @@ def render_ranking_tab() -> None:
                 "win_rate_pct": st.column_config.NumberColumn("勝率(%)"),
                 "max_drawdown_pct": st.column_config.NumberColumn("最大DD(%)"),
                 "risk_adjusted_return": st.column_config.NumberColumn("リスク調整済みリターン"),
+                "best_params_text": st.column_config.TextColumn("採用パラメータ"),
             },
             hide_index=True,
             on_select="rerun",
