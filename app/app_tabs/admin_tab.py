@@ -10,6 +10,14 @@ import pandas as pd
 import streamlit as st
 
 from admin import delete_user, list_users, set_admin_status
+from data_api.stock_price_api import (
+    load_company_profile,
+    load_fundamentals_snapshots_for_ticker,
+    load_price_history_for_ticker,
+    save_company_profile_fields,
+    save_fundamentals_snapshots_for_ticker,
+    save_price_history_for_ticker,
+)
 from strategy_builder.storage import (
     delete_strategy_by_id,
     load_all_strategies,
@@ -27,6 +35,8 @@ def render_admin_tab() -> None:
     _render_strategy_management()
     st.divider()
     _render_user_management()
+    st.divider()
+    _render_market_data_management()
 
 
 def _render_strategy_management() -> None:
@@ -146,3 +156,76 @@ def _render_user_management() -> None:
 
     if is_self:
         st.caption("自分自身の管理者権限剥奪・アカウント削除はできません。")
+
+
+def _render_market_data_management() -> None:
+    st.subheader("市場データ管理")
+    ticker = st.text_input("銘柄コード（例: 7203.T）", key="admin_market_data_ticker")
+    if not ticker:
+        st.caption("銘柄コードを入力すると、株価履歴・fundamentals・企業プロファイルを編集できます。")
+        return
+
+    st.markdown("**株価履歴（PriceHistory）**")
+    price_rows = load_price_history_for_ticker(ticker)
+    price_df = pd.DataFrame(
+        price_rows, columns=["date", "open", "high", "low", "close", "volume"]
+    )
+    edited_price_df = st.data_editor(
+        price_df,
+        num_rows="dynamic",
+        hide_index=True,
+        key=f"admin_price_history_editor_{ticker}",
+    )
+    if st.button("株価履歴を保存", key=f"admin_price_history_save_{ticker}"):
+        # 追加行のうちdate未入力の行（保存準備がまだ整っていない空行）は除外する
+        records = [r for r in edited_price_df.to_dict("records") if r.get("date")]
+        save_price_history_for_ticker(ticker, records)
+        st.success("株価履歴を保存しました。")
+        st.rerun()
+
+    st.markdown("**Fundamentalsスナップショット（FundamentalsSnapshot）**")
+    fundamentals_rows = load_fundamentals_snapshots_for_ticker(ticker)
+    fundamentals_df = pd.DataFrame(
+        fundamentals_rows,
+        columns=[
+            "snapshot_date",
+            "name",
+            "trailing_pe",
+            "price_to_book",
+            "dividend_yield",
+            "market_cap",
+            "return_on_equity",
+            "revenue_growth",
+        ],
+    )
+    edited_fundamentals_df = st.data_editor(
+        fundamentals_df,
+        num_rows="dynamic",
+        hide_index=True,
+        key=f"admin_fundamentals_editor_{ticker}",
+    )
+    if st.button("Fundamentalsスナップショットを保存", key=f"admin_fundamentals_save_{ticker}"):
+        records = [r for r in edited_fundamentals_df.to_dict("records") if r.get("snapshot_date")]
+        save_fundamentals_snapshots_for_ticker(ticker, records)
+        st.success("Fundamentalsスナップショットを保存しました。")
+        st.rerun()
+
+    st.markdown("**企業プロファイル（CompanyProfile）**")
+    profile = load_company_profile(ticker) or {}
+    with st.form(key=f"admin_company_profile_form_{ticker}"):
+        name = st.text_input("日本語銘柄名", value=profile.get("name") or "")
+        sector = st.text_input("業種", value=profile.get("sector") or "")
+        industry = st.text_input("詳細業種", value=profile.get("industry") or "")
+        business_summary = st.text_area(
+            "事業内容", value=profile.get("business_summary") or "", height=150
+        )
+        if st.form_submit_button("企業プロファイルを保存"):
+            save_company_profile_fields(
+                ticker,
+                name or None,
+                sector or None,
+                industry or None,
+                business_summary or None,
+            )
+            st.success("企業プロファイルを保存しました。")
+            st.rerun()
