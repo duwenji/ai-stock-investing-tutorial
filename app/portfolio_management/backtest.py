@@ -3,6 +3,7 @@
 解説文を生成するモジュール。"""
 
 import logging
+import statistics
 from itertools import product
 
 import pandas as pd
@@ -208,6 +209,32 @@ def run_grid_search(
         return _run_grid_combinations(
             prices, backtest_func, keys, combos, fixed_params, transaction_cost_pct
         )
+
+
+def summarize_grid_stability(grid_results: list[dict]) -> dict:
+    """グリッド全体のリスク調整済みリターンから、最良・最悪の組み合わせと
+    近傍全体の安定性（変動係数）を求める。"""
+    returns = [row["risk_adjusted_return"] for row in grid_results]
+    best = max(grid_results, key=lambda row: row["risk_adjusted_return"])
+    worst = min(grid_results, key=lambda row: row["risk_adjusted_return"])
+
+    mean = statistics.mean(returns)
+    # 母集団（グリッド全体）のばらつきを見るため、標本標準偏差ではなく母標準偏差を使う。
+    stdev = statistics.pstdev(returns)
+    if abs(mean) < 1e-6:
+        cv = None
+        is_stable = False
+    else:
+        cv = round(abs(stdev / mean), 4)
+        is_stable = cv < 0.5
+
+    return {
+        "best": best,
+        "worst": worst,
+        "cv": cv,
+        "is_stable": is_stable,
+        "grid_size": len(grid_results),
+    }
 
 
 # 画面（UI）に表示する戦略の一覧。各戦略の実行関数・プリセットパラメータ・

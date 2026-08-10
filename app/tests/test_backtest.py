@@ -13,6 +13,7 @@ from portfolio_management.backtest import (
     run_macd_crossover_backtest,
     run_rsi_reversal_backtest,
     run_universe_backtest_ranking,
+    summarize_grid_stability,
 )
 
 
@@ -484,3 +485,54 @@ def test_run_grid_search_logs_duration(caplog):
     assert "グリッドサーチ計算" in caplog.text
     assert "を開始" in caplog.text
     assert "が完了しました" in caplog.text
+
+
+def test_summarize_grid_stability_picks_best_and_worst_by_risk_adjusted_return():
+    grid_results = [
+        {"params": {"short_window": 5}, "risk_adjusted_return": 3.0},
+        {"params": {"short_window": 6}, "risk_adjusted_return": 9.0},
+        {"params": {"short_window": 7}, "risk_adjusted_return": 1.0},
+    ]
+
+    summary = summarize_grid_stability(grid_results)
+
+    assert summary["best"]["params"] == {"short_window": 6}
+    assert summary["worst"]["params"] == {"short_window": 7}
+    assert summary["grid_size"] == 3
+
+
+def test_summarize_grid_stability_is_stable_when_coefficient_of_variation_is_low():
+    grid_results = [
+        {"params": {"a": 1}, "risk_adjusted_return": 10.0},
+        {"params": {"a": 2}, "risk_adjusted_return": 10.0},
+        {"params": {"a": 3}, "risk_adjusted_return": 10.0},
+    ]
+
+    summary = summarize_grid_stability(grid_results)
+
+    assert summary["cv"] == 0.0
+    assert summary["is_stable"] is True
+
+
+def test_summarize_grid_stability_is_unstable_at_cv_boundary():
+    grid_results = [
+        {"params": {"a": 1}, "risk_adjusted_return": 5.0},
+        {"params": {"a": 2}, "risk_adjusted_return": 15.0},
+    ]
+
+    summary = summarize_grid_stability(grid_results)
+
+    assert summary["cv"] == 0.5
+    assert summary["is_stable"] is False
+
+
+def test_summarize_grid_stability_marks_unjudgeable_when_mean_near_zero():
+    grid_results = [
+        {"params": {"a": 1}, "risk_adjusted_return": 1.0},
+        {"params": {"a": 2}, "risk_adjusted_return": -1.0},
+    ]
+
+    summary = summarize_grid_stability(grid_results)
+
+    assert summary["cv"] is None
+    assert summary["is_stable"] is False
