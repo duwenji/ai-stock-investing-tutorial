@@ -54,3 +54,63 @@ class SectorDisplaySetting(Base):
     visible_json: Mapped[str] = mapped_column(Text, nullable=False)
     order_json: Mapped[str] = mapped_column(Text, nullable=False)
     height_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_price_history_ticker_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    date: Mapped[str] = mapped_column(nullable=False)
+    open: Mapped[float] = mapped_column(nullable=False)
+    high: Mapped[float] = mapped_column(nullable=False)
+    low: Mapped[float] = mapped_column(nullable=False)
+    close: Mapped[float] = mapped_column(nullable=False)
+    volume: Mapped[float] = mapped_column(nullable=False)
+
+
+class FundamentalsSnapshot(Base):
+    __tablename__ = "fundamentals_snapshots"
+    __table_args__ = (
+        UniqueConstraint("ticker", "snapshot_date", name="uq_fundamentals_ticker_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    snapshot_date: Mapped[str] = mapped_column(nullable=False)
+    name: Mapped[str | None] = mapped_column(nullable=True)
+    trailing_pe: Mapped[float | None] = mapped_column(nullable=True)
+    price_to_book: Mapped[float | None] = mapped_column(nullable=True)
+    dividend_yield: Mapped[float | None] = mapped_column(nullable=True)
+    market_cap: Mapped[float | None] = mapped_column(nullable=True)
+    return_on_equity: Mapped[float | None] = mapped_column(nullable=True)
+    revenue_growth: Mapped[float | None] = mapped_column(nullable=True)
+
+
+class CompanyProfile(Base):
+    __tablename__ = "company_profiles"
+
+    ticker: Mapped[str] = mapped_column(primary_key=True)
+    name: Mapped[str | None] = mapped_column(nullable=True)
+    name_updated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+    sector: Mapped[str | None] = mapped_column(nullable=True)
+    industry: Mapped[str | None] = mapped_column(nullable=True)
+    business_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_updated_at: Mapped[datetime.datetime | None] = mapped_column(nullable=True)
+
+
+class TickerNews(Base):
+    __tablename__ = "ticker_news"
+    __table_args__ = (
+        UniqueConstraint("ticker", "link", name="uq_ticker_news_ticker_link"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(nullable=True)
+    publisher: Mapped[str | None] = mapped_column(nullable=True)
+    link: Mapped[str | None] = mapped_column(nullable=True)
+    fetched_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)

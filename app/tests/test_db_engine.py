@@ -1,15 +1,34 @@
 from sqlalchemy import inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from db.engine import create_db_engine, init_db
-from db.models import Holding, SectorDisplaySetting, Strategy, User
+from db.models import (
+    CompanyProfile,
+    FundamentalsSnapshot,
+    Holding,
+    PriceHistory,
+    SectorDisplaySetting,
+    Strategy,
+    TickerNews,
+    User,
+)
 
 
 def test_init_db_creates_all_tables(tmp_path):
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(engine)
     table_names = set(inspect(engine).get_table_names())
-    assert {"users", "holdings", "strategies", "sector_display_settings"} <= table_names
+    assert {
+        "users",
+        "holdings",
+        "strategies",
+        "sector_display_settings",
+        "price_history",
+        "fundamentals_snapshots",
+        "company_profiles",
+        "ticker_news",
+    } <= table_names
 
 
 def test_init_db_allows_basic_crud(tmp_path):
@@ -30,17 +49,29 @@ def test_init_db_allows_basic_crud(tmp_path):
                 user_id=user.id, visible_json="{}", order_json="{}", height_json="{}"
             )
         )
+        session.add(
+            PriceHistory(
+                ticker="7203.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
+            )
+        )
+        session.add(
+            FundamentalsSnapshot(ticker="7203.T", snapshot_date="2026-01-01", trailing_pe=12.0)
+        )
+        session.add(CompanyProfile(ticker="7203.T", name="トヨタ自動車"))
+        session.add(TickerNews(ticker="7203.T", title="t", publisher="p", link="https://x/1"))
         session.commit()
 
     with session_factory() as session:
         assert session.query(Holding).count() == 1
         assert session.query(Strategy).count() == 1
         assert session.query(SectorDisplaySetting).count() == 1
+        assert session.query(PriceHistory).count() == 1
+        assert session.query(FundamentalsSnapshot).count() == 1
+        assert session.query(CompanyProfile).count() == 1
+        assert session.query(TickerNews).count() == 1
 
 
 def test_strategy_unique_constraint_on_user_and_name(tmp_path):
-    from sqlalchemy.exc import IntegrityError
-
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     init_db(engine)
     session_factory = sessionmaker(bind=engine)
@@ -55,6 +86,44 @@ def test_strategy_unique_constraint_on_user_and_name(tmp_path):
         session.commit()
 
         session.add(Strategy(user_id=user.id, strategy_name="A", strategy_json="{}"))
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_price_history_unique_constraint_on_ticker_and_date(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(
+            PriceHistory(ticker="A", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1)
+        )
+        session.commit()
+
+        session.add(
+            PriceHistory(ticker="A", date="2026-01-01", open=2, high=2, low=2, close=2, volume=2)
+        )
+        try:
+            session.commit()
+            assert False, "IntegrityErrorが発生するはず"
+        except IntegrityError:
+            session.rollback()
+
+
+def test_fundamentals_snapshot_unique_constraint_on_ticker_and_date(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(FundamentalsSnapshot(ticker="A", snapshot_date="2026-01-01"))
+        session.commit()
+
+        session.add(FundamentalsSnapshot(ticker="A", snapshot_date="2026-01-01"))
         try:
             session.commit()
             assert False, "IntegrityErrorが発生するはず"
