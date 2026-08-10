@@ -2,6 +2,7 @@
 ニュース等の市場データを取得するAPIラッパー群。取得結果のキャッシュ・
 複数銘柄の並行取得もあわせて提供する。"""
 
+import datetime
 import hashlib
 import json
 import logging
@@ -15,6 +16,8 @@ import yfinance as yf
 from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
+from db.engine import SessionLocal
+from db.models import PriceHistory
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +26,27 @@ logger = logging.getLogger(__name__)
 _YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
 
 
-def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
-    """指定銘柄の株価時系列（OHLCV）をyfinance経由で取得する。"""
+# アプリ内で使われる最大期間（1mo/6mo/1y/2y/3y/5y）。鮮度切れ時は常にこの期間で
+# yfinanceから取得してDBへ蓄積することで、以後どの期間で要求されてもDBだけで
+# 足りるようにする（呼び出しごとに異なる期間を要求されても再フェッチが不要になる）。
+_MAX_FETCH_PERIOD = "5y"
+_PERIOD_TO_DAYS = {
+    "1mo": 31,
+    "6mo": 186,
+    "1y": 366,
+    "2y": 731,
+    "3y": 1096,
+    "5y": 1827,
+}
+
+
+def _period_to_start_date(period: str) -> datetime.date:
+    days = _PERIOD_TO_DAYS.get(period, 366)
+    return datetime.date.today() - datetime.timedelta(days=days)
+
+
+def _fetch_price_history_from_yfinance(ticker_symbol: str, period: str) -> pd.DataFrame:
+    """yfinanceから直接株価時系列を取得する（DBを経由しない生の取得処理）。"""
     logger.info("株価履歴リクエスト: ticker=%s period=%s", ticker_symbol, period)
     ticker = yf.Ticker(ticker_symbol)
     history = ticker.history(period=period)
@@ -34,6 +56,82 @@ def fetch_price_history(ticker_symbol: str, period: str = "1mo"):
         history.to_json(orient="records", date_format="iso"),
     )
     return history
+
+
+def _upsert_price_history(session, ticker_symbol: str, history: pd.DataFrame) -> None:
+    """historyの各日付をPriceHistoryへ追記する。既にDBにある日付は上書きしない
+    （時系列を蓄積する方針のため）。"""
+    if history.empty:
+        return
+    existing_dates = {
+        row.date
+        for row in session.query(PriceHistory.date).filter_by(ticker=ticker_symbol).all()
+    }
+    for index, row in history.iterrows():
+        date_str = index.date().isoformat() if hasattr(index, "date") else str(index)
+        if date_str in existing_dates:
+            continue
+        session.add(
+            PriceHistory(
+                ticker=ticker_symbol,
+                date=date_str,
+                open=float(row["Open"]),
+                high=float(row["High"]),
+                low=float(row["Low"]),
+                close=float(row["Close"]),
+                volume=float(row["Volume"]),
+            )
+        )
+        existing_dates.add(date_str)
+
+
+def _load_price_history_from_db(session, ticker_symbol: str, period: str) -> pd.DataFrame:
+    start_date = _period_to_start_date(period).isoformat()
+    rows = (
+        session.query(PriceHistory)
+        .filter(PriceHistory.ticker == ticker_symbol, PriceHistory.date >= start_date)
+        .order_by(PriceHistory.date)
+        .all()
+    )
+    if not rows:
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    return pd.DataFrame(
+        {
+            "Open": [r.open for r in rows],
+            "High": [r.high for r in rows],
+            "Low": [r.low for r in rows],
+            "Close": [r.close for r in rows],
+            "Volume": [r.volume for r in rows],
+        },
+        index=pd.to_datetime([r.date for r in rows]),
+    )
+
+
+def fetch_price_history(
+    ticker_symbol: str, period: str = "1mo", session_factory=SessionLocal
+) -> pd.DataFrame:
+    """指定銘柄の株価時系列（OHLCV）を取得する。DB上の当該銘柄の最新日付が
+    「本日から1日以内」ならDBから期間分を組み立てて返す。それより古い/データ無し
+    ならyfinanceから_MAX_FETCH_PERIOD分を取得してPriceHistoryへ追記した上で、
+    DBから期間分を組み立てて返す。"""
+    with session_factory() as session:
+        latest_date_str = (
+            session.query(PriceHistory.date)
+            .filter_by(ticker=ticker_symbol)
+            .order_by(PriceHistory.date.desc())
+            .limit(1)
+            .scalar()
+        )
+        is_fresh = latest_date_str is not None and (
+            datetime.date.today() - datetime.date.fromisoformat(latest_date_str)
+        ).days <= 1
+
+        if not is_fresh:
+            history = _fetch_price_history_from_yfinance(ticker_symbol, _MAX_FETCH_PERIOD)
+            _upsert_price_history(session, ticker_symbol, history)
+            session.commit()
+
+        return _load_price_history_from_db(session, ticker_symbol, period)
 
 
 def fetch_fundamentals(ticker_symbol: str) -> dict:

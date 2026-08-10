@@ -1,9 +1,12 @@
+import datetime
 import logging
 
 import pandas as pd
 import pytest
+from sqlalchemy.orm import sessionmaker
 
 import data_api.stock_price_api as stock_price_api
+from db.engine import create_db_engine, init_db
 
 
 class FakeTicker:
@@ -11,7 +14,17 @@ class FakeTicker:
         self.symbol = symbol
 
     def history(self, period="1mo"):
-        return pd.DataFrame({"Close": [100, 101, 102]})
+        dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=3, freq="D")
+        return pd.DataFrame(
+            {
+                "Open": [100.0, 101.0, 102.0],
+                "High": [105.0, 106.0, 107.0],
+                "Low": [99.0, 100.0, 101.0],
+                "Close": [100.0, 101.0, 102.0],
+                "Volume": [1000.0, 1100.0, 1200.0],
+            },
+            index=dates,
+        )
 
     @property
     def info(self):
@@ -60,10 +73,88 @@ class EmptyInfoTicker(FakeTicker):
         return {}
 
 
-def test_fetch_price_history_returns_dataframe(monkeypatch):
+def test_fetch_price_history_returns_dataframe(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
-    df = stock_price_api.fetch_price_history("7203.T")
-    assert list(df["Close"]) == [100, 101, 102]
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    df = stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    assert list(df["Close"]) == [100.0, 101.0, 102.0]
+
+
+def test_fetch_price_history_reuses_db_on_second_call(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+
+    class CountingTicker(FakeTicker):
+        def history(self, period="1mo"):
+            call_count["n"] += 1
+            return super().history(period=period)
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+
+    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+
+
+def test_fetch_price_history_refetches_when_stale(monkeypatch, tmp_path):
+    call_count = {"n": 0}
+
+    class CountingTicker(FakeTicker):
+        def history(self, period="1mo"):
+            call_count["n"] += 1
+            return super().history(period=period)
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", CountingTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    old_date = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
+    with session_factory() as session:
+        session.add(
+            stock_price_api.PriceHistory(
+                ticker="7203.T", date=old_date, open=1, high=1, low=1, close=1, volume=1
+            )
+        )
+        session.commit()
+
+    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 1
+
+
+def test_upsert_price_history_skips_existing_dates(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    dates = pd.date_range("2026-01-01", periods=3, freq="D")
+    history = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0, 3.0],
+            "High": [1.0, 2.0, 3.0],
+            "Low": [1.0, 2.0, 3.0],
+            "Close": [1.0, 2.0, 3.0],
+            "Volume": [1.0, 2.0, 3.0],
+        },
+        index=dates,
+    )
+
+    with session_factory() as session:
+        stock_price_api._upsert_price_history(session, "7203.T", history)
+        session.commit()
+        assert session.query(stock_price_api.PriceHistory).count() == 3
+
+    with session_factory() as session:
+        stock_price_api._upsert_price_history(session, "7203.T", history)
+        session.commit()
+        assert session.query(stock_price_api.PriceHistory).count() == 3
 
 
 def test_fetch_fundamentals_maps_info_fields(monkeypatch):
@@ -252,12 +343,19 @@ def test_fetch_universe_fundamentals_logs_duration(tmp_path, caplog):
     assert "が完了しました" in caplog.text
 
 
-def test_fetch_price_history_logs_request_and_response(monkeypatch, caplog):
+def test_fetch_price_history_logs_request_and_response(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
-    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_price_history("7203.T", period="1mo")
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
 
-    assert "株価履歴リクエスト: ticker=7203.T period=1mo" in caplog.text
+    with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
+        stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+
+    assert (
+        f"株価履歴リクエスト: ticker=7203.T period={stock_price_api._MAX_FETCH_PERIOD}"
+        in caplog.text
+    )
     assert "株価履歴レスポンス: ticker=7203.T" in caplog.text
     assert "101" in caplog.text
 
