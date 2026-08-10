@@ -23,6 +23,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(nullable=False)
     first_name: Mapped[str | None] = mapped_column(nullable=True)
     last_name: Mapped[str | None] = mapped_column(nullable=True)
+    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
 
 

@@ -184,3 +184,65 @@ def test_user_stores_first_name_and_last_name(tmp_path):
         stored = session.query(User).filter_by(username="taro").one()
         assert stored.first_name == "太郎"
         assert stored.last_name == "山田"
+
+
+def test_init_db_adds_is_admin_column_to_existing_table(tmp_path):
+    from sqlalchemy import text
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    # is_admin列追加前のusersテーブルを模して作成する
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+                "email TEXT UNIQUE, hashed_password TEXT NOT NULL, created_at DATETIME)"
+            )
+        )
+        connection.commit()
+
+    init_db(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
+        }
+    assert "is_admin" in columns
+
+
+def test_init_db_grants_admin_to_first_user_when_no_admin_exists(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(User(username="alice", hashed_password="h"))
+        session.add(User(username="bob", hashed_password="h"))
+        session.commit()
+
+    # init_db()の再呼び出し（実際にはapp.py起動のたびに呼ばれる）で
+    # 最初に作成されたユーザーに管理者権限が自動付与される
+    init_db(engine)
+
+    with session_factory() as session:
+        alice = session.query(User).filter_by(username="alice").one()
+        bob = session.query(User).filter_by(username="bob").one()
+        assert alice.is_admin is True
+        assert bob.is_admin is False
+
+
+def test_init_db_does_not_override_existing_admin_assignment(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(User(username="alice", hashed_password="h", is_admin=False))
+        session.add(User(username="bob", hashed_password="h", is_admin=True))
+        session.commit()
+
+    init_db(engine)
+
+    with session_factory() as session:
+        alice = session.query(User).filter_by(username="alice").one()
+        assert alice.is_admin is False  # 既にbobがadminなので上書きされない
