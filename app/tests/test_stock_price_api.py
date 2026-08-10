@@ -207,18 +207,56 @@ def test_fetch_fundamentals_reuses_snapshot_on_second_call_same_day(monkeypatch,
     assert call_count["n"] == 1
 
 
-def test_fetch_news_returns_title_publisher_and_link(monkeypatch):
+def test_fetch_news_returns_title_publisher_and_link(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
-    news = stock_price_api.fetch_news("7203.T", limit=1)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    news = stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
     assert news == [
         {"title": "Headline 1", "publisher": "Pub", "link": "https://example.com/1"}
     ]
 
 
-def test_fetch_news_handles_missing_nested_fields(monkeypatch):
+def test_fetch_news_handles_missing_nested_fields(monkeypatch, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", MissingNewsFieldsTicker)
-    news = stock_price_api.fetch_news("7203.T", limit=1)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    news = stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
     assert news == [{"title": "Headline only", "publisher": None, "link": None}]
+
+
+def test_fetch_news_accumulates_across_calls_without_duplicates(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_news("7203.T", limit=5, session_factory=session_factory)
+    stock_price_api.fetch_news("7203.T", limit=5, session_factory=session_factory)
+
+    with session_factory() as session:
+        assert (
+            session.query(stock_price_api.TickerNews).filter_by(ticker="7203.T").count() == 2
+        )
+
+
+def test_fetch_news_deduplicates_articles_without_link(monkeypatch, tmp_path):
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", MissingNewsFieldsTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    stock_price_api.fetch_news("7203.T", limit=5, session_factory=session_factory)
+    stock_price_api.fetch_news("7203.T", limit=5, session_factory=session_factory)
+
+    with session_factory() as session:
+        assert (
+            session.query(stock_price_api.TickerNews).filter_by(ticker="7203.T").count() == 1
+        )
 
 
 class FakeResponse:
@@ -458,10 +496,14 @@ def test_fetch_fundamentals_logs_request_and_response(monkeypatch, caplog, tmp_p
     assert "Fake Corp" in caplog.text
 
 
-def test_fetch_news_logs_request_and_response(monkeypatch, caplog):
+def test_fetch_news_logs_request_and_response(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
     with caplog.at_level(logging.INFO, logger="data_api.stock_price_api"):
-        stock_price_api.fetch_news("7203.T", limit=1)
+        stock_price_api.fetch_news("7203.T", limit=1, session_factory=session_factory)
 
     assert "newsリクエスト: ticker=7203.T limit=1" in caplog.text
     assert "newsレスポンス: ticker=7203.T" in caplog.text

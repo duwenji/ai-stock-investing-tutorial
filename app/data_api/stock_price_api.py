@@ -17,7 +17,7 @@ from common.cache import read_cache, write_cache
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
 from db.engine import SessionLocal
-from db.models import CompanyProfile, FundamentalsSnapshot, PriceHistory
+from db.models import CompanyProfile, FundamentalsSnapshot, PriceHistory, TickerNews
 
 logger = logging.getLogger(__name__)
 
@@ -252,8 +252,9 @@ def fetch_company_profile(ticker_symbol: str, session_factory=SessionLocal) -> d
         return result
 
 
-def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
-    """指定銘柄に関連する最新ニュースを取得し、表示に必要な項目だけに整形する。"""
+def _fetch_news_from_yfinance(ticker_symbol: str, limit: int) -> list[dict]:
+    """yfinanceから直接ニュースを取得し、表示に必要な項目だけに整形する
+    （DBを経由しない生の取得処理）。"""
     logger.info("newsリクエスト: ticker=%s limit=%s", ticker_symbol, limit)
     ticker = yf.Ticker(ticker_symbol)
     news_items = ticker.news or []
@@ -273,6 +274,64 @@ def fetch_news(ticker_symbol: str, limit: int = 5) -> list[dict]:
         )
     logger.info("newsレスポンス: ticker=%s data=%s", ticker_symbol, result)
     return result
+
+
+def _insert_new_ticker_news(session, ticker_symbol: str, items: list[dict]) -> None:
+    """未知の記事のみTickerNewsへ追記する。linkがある記事は(ticker, link)で、
+    linkが無い記事は(ticker, title, publisher)で重複判定する。"""
+    existing_links = {
+        row.link
+        for row in session.query(TickerNews.link)
+        .filter_by(ticker=ticker_symbol)
+        .filter(TickerNews.link.isnot(None))
+        .all()
+    }
+    existing_no_link = {
+        (row.title, row.publisher)
+        for row in session.query(TickerNews.title, TickerNews.publisher)
+        .filter_by(ticker=ticker_symbol, link=None)
+        .all()
+    }
+    for item in items:
+        link = item.get("link")
+        if link is not None:
+            if link in existing_links:
+                continue
+            existing_links.add(link)
+        else:
+            key = (item.get("title"), item.get("publisher"))
+            if key in existing_no_link:
+                continue
+            existing_no_link.add(key)
+        session.add(
+            TickerNews(
+                ticker=ticker_symbol,
+                title=item.get("title"),
+                publisher=item.get("publisher"),
+                link=link,
+            )
+        )
+
+
+def fetch_news(ticker_symbol: str, limit: int = 5, session_factory=SessionLocal) -> list[dict]:
+    """指定銘柄に関連する最新ニュースを取得する。毎回yfinanceから最新記事を取得して
+    未知の記事のみDBへ追記した上で、DBに蓄積された記事から最新limit件を返す
+    （複数ユーザーの取得タイミングの違いにより結果的に記事が積み上がる）。"""
+    with session_factory() as session:
+        fresh_items = _fetch_news_from_yfinance(ticker_symbol, limit)
+        _insert_new_ticker_news(session, ticker_symbol, fresh_items)
+        session.commit()
+
+        rows = (
+            session.query(TickerNews)
+            .filter_by(ticker=ticker_symbol)
+            .order_by(TickerNews.fetched_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {"title": row.title, "publisher": row.publisher, "link": row.link} for row in rows
+        ]
 
 
 def _fetch_japanese_name_from_source(ticker_symbol: str) -> str | None:
