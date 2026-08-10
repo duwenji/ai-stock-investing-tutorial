@@ -118,15 +118,15 @@ def test_fetch_price_history_refetches_when_stale(monkeypatch, tmp_path):
 
     old_date = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
     with session_factory() as session:
-        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
+        session.add(stock_price_api.CompanyProfile(ticker="TEST1.T"))
         session.add(
             stock_price_api.PriceHistory(
-                ticker="7203.T", date=old_date, open=1, high=1, low=1, close=1, volume=1
+                ticker="TEST1.T", date=old_date, open=1, high=1, low=1, close=1, volume=1
             )
         )
         session.commit()
 
-    stock_price_api.fetch_price_history("7203.T", session_factory=session_factory)
+    stock_price_api.fetch_price_history("TEST1.T", session_factory=session_factory)
     assert call_count["n"] == 1
 
 
@@ -634,12 +634,12 @@ def test_fetch_company_profile_refetches_when_stale(monkeypatch, tmp_path):
     with session_factory() as session:
         session.add(
             stock_price_api.CompanyProfile(
-                ticker="7203.T", sector="Old", industry="Old", profile_updated_at=old_time
+                ticker="TEST1.T", sector="Old", industry="Old", profile_updated_at=old_time
             )
         )
         session.commit()
 
-    result = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    result = stock_price_api.fetch_company_profile("TEST1.T", session_factory=session_factory)
     assert result["sector"] == "Consumer Cyclical"
 
 
@@ -663,21 +663,21 @@ def test_load_price_history_for_ticker_returns_rows_sorted_by_date(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
-        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
+        session.add(stock_price_api.CompanyProfile(ticker="TEST1.T"))
         session.add(
             stock_price_api.PriceHistory(
-                ticker="7203.T", date="2026-01-02", open=2, high=2, low=2, close=2, volume=2
+                ticker="TEST1.T", date="2026-01-02", open=2, high=2, low=2, close=2, volume=2
             )
         )
         session.add(
             stock_price_api.PriceHistory(
-                ticker="7203.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
+                ticker="TEST1.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
             )
         )
         session.commit()
 
     rows = stock_price_api.load_price_history_for_ticker(
-        "7203.T", session_factory=session_factory
+        "TEST1.T", session_factory=session_factory
     )
     assert [r["date"] for r in rows] == ["2026-01-01", "2026-01-02"]
     assert rows[0]["open"] == 1.0
@@ -774,16 +774,16 @@ def test_load_fundamentals_snapshots_for_ticker_returns_all_fields(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
-        session.add(stock_price_api.CompanyProfile(ticker="7203.T"))
+        session.add(stock_price_api.CompanyProfile(ticker="TEST1.T"))
         session.add(
             stock_price_api.FundamentalsSnapshot(
-                ticker="7203.T", snapshot_date="2026-01-01", trailing_pe=12.3, market_cap=1000
+                ticker="TEST1.T", snapshot_date="2026-01-01", trailing_pe=12.3, market_cap=1000
             )
         )
         session.commit()
 
     rows = stock_price_api.load_fundamentals_snapshots_for_ticker(
-        "7203.T", session_factory=session_factory
+        "TEST1.T", session_factory=session_factory
     )
     assert len(rows) == 1
     assert rows[0]["snapshot_date"] == "2026-01-01"
@@ -820,7 +820,7 @@ def test_load_company_profile_returns_none_when_missing(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     assert (
-        stock_price_api.load_company_profile("7203.T", session_factory=session_factory) is None
+        stock_price_api.load_company_profile("TEST1.T", session_factory=session_factory) is None
     )
 
 
@@ -851,11 +851,11 @@ def test_save_company_profile_fields_updates_existing_row(tmp_path):
     session_factory = sessionmaker(bind=engine)
 
     with session_factory() as session:
-        session.add(stock_price_api.CompanyProfile(ticker="7203.T", sector="Old"))
+        session.add(stock_price_api.CompanyProfile(ticker="TEST1.T", sector="Old"))
         session.commit()
 
     stock_price_api.save_company_profile_fields(
-        "7203.T",
+        "TEST1.T",
         "トヨタ自動車",
         "Consumer Cyclical",
         "Auto Manufacturers",
@@ -863,7 +863,7 @@ def test_save_company_profile_fields_updates_existing_row(tmp_path):
         session_factory=session_factory,
     )
 
-    profile = stock_price_api.load_company_profile("7203.T", session_factory=session_factory)
+    profile = stock_price_api.load_company_profile("TEST1.T", session_factory=session_factory)
     assert profile["sector"] == "Consumer Cyclical"
 
 

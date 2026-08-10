@@ -1,5 +1,6 @@
 """SQLAlchemyエンジン・セッション生成、DBスキーマ初期化。"""
 
+import csv
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
@@ -12,6 +13,7 @@ from db.models import Base
 APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
 DB_PATH = DATA_DIR / "app.db"
+SEED_COMPANY_PROFILES_PATH = Path(__file__).resolve().parent / "seed_company_profiles.csv"
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
@@ -52,6 +54,7 @@ def init_db(engine: Engine) -> None:
     _grant_admin_to_first_user_if_none_exists(engine)
     _ensure_market_data_foreign_keys(engine)
     _ensure_company_profile_sector_jp_column(engine)
+    _seed_default_company_profiles(engine)
 
 
 def _add_column_if_missing(
@@ -100,6 +103,55 @@ def _ensure_company_profile_sector_jp_column(engine: Engine) -> None:
         _add_column_if_missing(
             connection, "company_profiles", existing_columns, "sector_jp", "TEXT"
         )
+        connection.commit()
+
+
+def _seed_default_company_profiles(
+    engine: Engine, seed_path: Path = SEED_COMPANY_PROFILES_PATH
+) -> None:
+    """seed_company_profiles.csv（旧UNIVERSE_NAMES/SECTOR_MAP相当の静的データ）を
+    company_profilesへ投入する。該当tickerの行が無ければ新規作成し、あっても
+    name/sector_jpがNULLの場合はそのフィールドのみ埋める。既に値が入っている列
+    （実際にyfinanceから取得済みの値や管理者が編集した値）は上書きしない。"""
+    if not seed_path.exists():
+        return
+    with seed_path.open(encoding="utf-8", newline="") as f:
+        seed_rows = list(csv.DictReader(f))
+
+    with engine.connect() as connection:
+        for seed_row in seed_rows:
+            ticker = seed_row["ticker"]
+            existing = connection.execute(
+                text("SELECT name, sector_jp FROM company_profiles WHERE ticker = :ticker"),
+                {"ticker": ticker},
+            ).first()
+            if existing is None:
+                connection.execute(
+                    text(
+                        "INSERT INTO company_profiles (ticker, name, sector_jp) "
+                        "VALUES (:ticker, :name, :sector_jp)"
+                    ),
+                    {
+                        "ticker": ticker,
+                        "name": seed_row["name"],
+                        "sector_jp": seed_row["sector_jp"],
+                    },
+                )
+                continue
+            existing_name, existing_sector_jp = existing
+            if existing_name is None:
+                connection.execute(
+                    text("UPDATE company_profiles SET name = :name WHERE ticker = :ticker"),
+                    {"ticker": ticker, "name": seed_row["name"]},
+                )
+            if existing_sector_jp is None:
+                connection.execute(
+                    text(
+                        "UPDATE company_profiles SET sector_jp = :sector_jp "
+                        "WHERE ticker = :ticker"
+                    ),
+                    {"ticker": ticker, "sector_jp": seed_row["sector_jp"]},
+                )
         connection.commit()
 
 

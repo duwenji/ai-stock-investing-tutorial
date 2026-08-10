@@ -42,7 +42,7 @@ def test_init_db_allows_basic_crud(tmp_path):
         session.commit()
         session.refresh(user)
 
-        session.add(Holding(user_id=user.id, ticker="7203.T", shares=100.0, cost=2500.0))
+        session.add(Holding(user_id=user.id, ticker="TEST1.T", shares=100.0, cost=2500.0))
         session.add(Strategy(user_id=user.id, strategy_name="A", strategy_json="{}"))
         session.add(
             SectorDisplaySetting(
@@ -51,14 +51,14 @@ def test_init_db_allows_basic_crud(tmp_path):
         )
         session.add(
             PriceHistory(
-                ticker="7203.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
+                ticker="TEST1.T", date="2026-01-01", open=1, high=1, low=1, close=1, volume=1
             )
         )
         session.add(
-            FundamentalsSnapshot(ticker="7203.T", snapshot_date="2026-01-01", trailing_pe=12.0)
+            FundamentalsSnapshot(ticker="TEST1.T", snapshot_date="2026-01-01", trailing_pe=12.0)
         )
-        session.add(CompanyProfile(ticker="7203.T", name="トヨタ自動車"))
-        session.add(TickerNews(ticker="7203.T", title="t", publisher="p", link="https://x/1"))
+        session.add(CompanyProfile(ticker="TEST1.T", name="トヨタ自動車"))
+        session.add(TickerNews(ticker="TEST1.T", title="t", publisher="p", link="https://x/1"))
         session.commit()
 
     with session_factory() as session:
@@ -67,7 +67,9 @@ def test_init_db_allows_basic_crud(tmp_path):
         assert session.query(SectorDisplaySetting).count() == 1
         assert session.query(PriceHistory).count() == 1
         assert session.query(FundamentalsSnapshot).count() == 1
-        assert session.query(CompanyProfile).count() == 1
+        # company_profilesはinit_db()がseed_company_profiles.csvから228件を
+        # 自動投入するため、全体件数ではなくこのテストが作った行を個別に確認する
+        assert session.query(CompanyProfile).filter_by(ticker="TEST1.T").count() == 1
         assert session.query(TickerNews).count() == 1
 
 
@@ -505,3 +507,82 @@ def test_init_db_adds_sector_jp_column_to_existing_company_profiles_table(tmp_pa
             ).fetchall()
         }
     assert "sector_jp" in columns
+
+
+def test_seed_default_company_profiles_inserts_missing_ticker(tmp_path):
+    from db.engine import _seed_default_company_profiles
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+
+    seed_path = tmp_path / "seed.csv"
+    seed_path.write_text(
+        "ticker,name,sector_jp\nTEST1.T,テスト株式会社,情報通信・サービスその他\n",
+        encoding="utf-8",
+    )
+    _seed_default_company_profiles(engine, seed_path=seed_path)
+
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        profile = session.get(CompanyProfile, "TEST1.T")
+        assert profile.name == "テスト株式会社"
+        assert profile.sector_jp == "情報通信・サービスその他"
+
+
+def test_seed_default_company_profiles_fills_only_null_fields(tmp_path):
+    from db.engine import _seed_default_company_profiles
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(CompanyProfile(ticker="TEST1.T", name="実際の名前"))
+        session.commit()
+
+    seed_path = tmp_path / "seed.csv"
+    seed_path.write_text(
+        "ticker,name,sector_jp\nTEST1.T,テスト株式会社,情報通信・サービスその他\n",
+        encoding="utf-8",
+    )
+    _seed_default_company_profiles(engine, seed_path=seed_path)
+
+    with session_factory() as session:
+        profile = session.get(CompanyProfile, "TEST1.T")
+        assert profile.name == "実際の名前"
+        assert profile.sector_jp == "情報通信・サービスその他"
+
+
+def test_seed_default_company_profiles_does_not_overwrite_existing_values(tmp_path):
+    from db.engine import _seed_default_company_profiles
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with session_factory() as session:
+        session.add(CompanyProfile(ticker="TEST1.T", name="実際の名前", sector_jp="実際の業種"))
+        session.commit()
+
+    seed_path = tmp_path / "seed.csv"
+    seed_path.write_text(
+        "ticker,name,sector_jp\nTEST1.T,テスト株式会社,情報通信・サービスその他\n",
+        encoding="utf-8",
+    )
+    _seed_default_company_profiles(engine, seed_path=seed_path)
+
+    with session_factory() as session:
+        profile = session.get(CompanyProfile, "TEST1.T")
+        assert profile.name == "実際の名前"
+        assert profile.sector_jp == "実際の業種"
+
+
+def test_init_db_seeds_default_company_profiles_from_real_seed_file(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        profile = session.get(CompanyProfile, "7203.T")
+        assert profile is not None
+        assert profile.name
+        assert profile.sector_jp
