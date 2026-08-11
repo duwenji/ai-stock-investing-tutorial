@@ -14,7 +14,7 @@ import streamlit_authenticator as stauth
 from auth import build_credentials, get_is_admin, get_user_id, persist_new_user, persist_password_update
 from common.disclaimer import DISCLAIMER_NOTICE
 from common.logging_config import setup_logging
-from data_api.llm_client import check_claude_cli_available
+from data_api.llm_client import check_llm_available
 from db.engine import engine, init_db
 
 from app_tabs.admin_tab import render_admin_tab
@@ -36,9 +36,9 @@ st.set_page_config(page_title="株投資リサーチアプリ", layout="wide")
 
 init_db(engine)
 
-# Claude CLIが利用できない環境ではLLM機能が動作しないため、起動時点でチェックしてアプリを止める
+# 設定されたLLMプロバイダが利用できない環境ではLLM機能が動作しないため、起動時点でチェックしてアプリを止める
 try:
-    check_claude_cli_available()
+    check_llm_available()
 except Exception as exc:
     st.error(str(exc))
     st.stop()

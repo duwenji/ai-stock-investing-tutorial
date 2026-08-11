@@ -70,9 +70,20 @@ def _resolve_claude_executable() -> str:
     return executable
 
 
-def check_claude_cli_available() -> None:
-    """CLI利用可否を事前チェックするためのエントリポイント（結果は例外の有無で判定）。"""
-    _resolve_claude_executable()
+def check_llm_available() -> None:
+    """設定されたLLMプロバイダの利用可否を事前チェックするためのエントリポイント
+    （結果は例外の有無で判定）。"""
+    provider = _get_provider()
+    if provider == "claude_cli":
+        _resolve_claude_executable()
+    elif provider == "openai":
+        if not _get_secret("openai_api_key"):
+            raise OpenAIAPIKeyMissingError(
+                "OpenAI APIキーが設定されていません。"
+                "`.streamlit/secrets.toml` に `openai_api_key = \"...\"` を設定してください。"
+            )
+    else:
+        raise ValueError(f"未対応のllm_providerです: {provider}")
 
 
 def _call_claude_cli(prompt: str, timeout: int) -> str:
@@ -132,4 +143,10 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
 
     各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
     """
-    return _call_claude_cli(prompt, timeout)
+    provider = _get_provider()
+    if provider == "claude_cli":
+        return _call_claude_cli(prompt, timeout)
+    elif provider == "openai":
+        return _call_openai(prompt, timeout)
+    else:
+        raise ValueError(f"未対応のllm_providerです: {provider}")

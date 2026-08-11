@@ -16,11 +16,12 @@ from data_api.llm_client import (
     _get_provider,
     _get_secret,
     call_llm,
-    check_claude_cli_available,
+    check_llm_available,
 )
 
 
 def test_call_llm_returns_stdout_on_success(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
@@ -35,6 +36,7 @@ def test_call_llm_returns_stdout_on_success(monkeypatch):
 
 
 def test_call_llm_raises_on_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
@@ -46,23 +48,66 @@ def test_call_llm_raises_on_nonzero_exit(monkeypatch):
 
 
 def test_call_llm_raises_when_cli_not_found(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: None)
     with pytest.raises(ClaudeCLINotFoundError):
         call_llm("hello")
 
 
-def test_check_claude_cli_available_raises_when_missing(monkeypatch):
+def test_check_llm_available_raises_when_claude_cli_missing(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: None)
     with pytest.raises(ClaudeCLINotFoundError):
-        check_claude_cli_available()
+        check_llm_available()
 
 
-def test_check_claude_cli_available_passes_when_found(monkeypatch):
+def test_check_llm_available_passes_when_claude_cli_found(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
-    check_claude_cli_available()
+    check_llm_available()
+
+
+def test_check_llm_available_raises_when_openai_key_missing(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"llm_provider": "openai"})
+    with pytest.raises(OpenAIAPIKeyMissingError):
+        check_llm_available()
+
+
+def test_check_llm_available_passes_when_openai_key_present(monkeypatch):
+    monkeypatch.setattr(
+        st, "secrets", {"llm_provider": "openai", "openai_api_key": "test-key"}
+    )
+    check_llm_available()
+
+
+def test_check_llm_available_raises_on_unknown_provider(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"llm_provider": "unknown"})
+    with pytest.raises(ValueError):
+        check_llm_available()
+
+
+def test_call_llm_dispatches_to_openai_when_configured(monkeypatch):
+    monkeypatch.setattr(
+        st, "secrets", {"llm_provider": "openai", "openai_api_key": "test-key"}
+    )
+
+    def fake_call_openai(prompt, timeout):
+        assert prompt == "hello"
+        assert timeout == 120
+        return "openai response"
+
+    monkeypatch.setattr("data_api.llm_client._call_openai", fake_call_openai)
+    assert call_llm("hello") == "openai response"
+
+
+def test_call_llm_raises_on_unknown_provider(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"llm_provider": "unknown"})
+    with pytest.raises(ValueError):
+        call_llm("hello")
 
 
 def test_call_llm_logs_duration_on_success(monkeypatch, caplog):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
@@ -78,6 +123,7 @@ def test_call_llm_logs_duration_on_success(monkeypatch, caplog):
 
 
 def test_call_llm_logs_failure_on_nonzero_exit(monkeypatch, caplog):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
@@ -92,6 +138,7 @@ def test_call_llm_logs_failure_on_nonzero_exit(monkeypatch, caplog):
 
 
 def test_call_llm_logs_request_and_response_content(monkeypatch, caplog):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
@@ -106,6 +153,7 @@ def test_call_llm_logs_request_and_response_content(monkeypatch, caplog):
 
 
 def test_call_llm_does_not_log_response_on_failure(monkeypatch, caplog):
+    monkeypatch.setattr(st, "secrets", {})
     monkeypatch.setattr("shutil.which", lambda name: "claude-executable")
 
     def fake_run(args, input, capture_output, text, encoding, timeout):
