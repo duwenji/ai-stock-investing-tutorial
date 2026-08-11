@@ -96,6 +96,47 @@ def _run_grid_combinations(
     return grid_results
 
 
+def compute_ma_crossover_series(
+    prices: pd.Series, short_window: int, long_window: int
+) -> tuple[pd.Series, pd.Series]:
+    """移動平均クロスオーバー戦略の短期/長期移動平均系列を計算する。"""
+    short_ma = prices.rolling(short_window).mean()
+    long_ma = prices.rolling(long_window).mean()
+    return short_ma, long_ma
+
+
+def compute_rsi_series(prices: pd.Series, period: int) -> pd.Series:
+    """RSI逆張り戦略のRSI系列を計算する。"""
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def compute_macd_series(
+    prices: pd.Series, fast: int, slow: int, signal: int
+) -> tuple[pd.Series, pd.Series]:
+    """MACDクロスオーバー戦略のMACD線/シグナル線系列を計算する。"""
+    fast_ema = prices.ewm(span=fast, adjust=False).mean()
+    slow_ema = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line
+
+
+def compute_bollinger_bands(
+    prices: pd.Series, window: int, num_std: float
+) -> tuple[pd.Series, pd.Series]:
+    """ボリンジャーバンド逆張り戦略の中心線/下バンド系列を計算する。"""
+    middle_band = prices.rolling(window).mean()
+    band_std = prices.rolling(window).std()
+    lower_band = middle_band - num_std * band_std
+    return middle_band, lower_band
+
+
 def run_ma_crossover_backtest(
     prices: pd.Series,
     short_window: int = 25,
@@ -103,8 +144,7 @@ def run_ma_crossover_backtest(
     transaction_cost_pct: float = 0.0,
 ) -> dict:
     """移動平均クロスオーバー戦略をベクトル化してバックテストする。"""
-    short_ma = prices.rolling(short_window).mean()
-    long_ma = prices.rolling(long_window).mean()
+    short_ma, long_ma = compute_ma_crossover_series(prices, short_window, long_window)
 
     # 短期MAが長期MAを上回っている日をロングポジション(1)とする。
     # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
@@ -122,14 +162,7 @@ def run_rsi_reversal_backtest(
     transaction_cost_pct: float = 0.0,
 ) -> dict:
     """RSI逆張り戦略をベクトル化してバックテストする。"""
-    # 値上がり幅と値下がり幅を分離し、それぞれの移動平均比からRSIを算出する。
-    delta = prices.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
+    rsi = compute_rsi_series(prices, period)
 
     # RSIが売られすぎ水準を下から上に回復した日にロングエントリー、
     # 買われすぎ水準に達した日に手仕舞いする。
@@ -158,10 +191,7 @@ def run_macd_crossover_backtest(
     transaction_cost_pct: float = 0.0,
 ) -> dict:
     """MACDクロスオーバー戦略をベクトル化してバックテストする。"""
-    fast_ema = prices.ewm(span=fast, adjust=False).mean()
-    slow_ema = prices.ewm(span=slow, adjust=False).mean()
-    macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    macd_line, signal_line = compute_macd_series(prices, fast, slow, signal)
 
     # MACD線がシグナル線を上回っている日をロングポジション(1)とする。
     # シグナル発生日の終値ではなく翌日約定とするため1日ずらす
@@ -178,9 +208,7 @@ def run_bollinger_reversal_backtest(
     transaction_cost_pct: float = 0.0,
 ) -> dict:
     """ボリンジャーバンド逆張り戦略をベクトル化してバックテストする。"""
-    middle_band = prices.rolling(window).mean()
-    band_std = prices.rolling(window).std()
-    lower_band = middle_band - num_std * band_std
+    middle_band, lower_band = compute_bollinger_bands(prices, window, num_std)
 
     # 終値が下バンドを下回った日にロングエントリー、
     # 中心線（移動平均）以上に回帰した日に手仕舞いする。

@@ -6,6 +6,10 @@ import pandas as pd
 from common.disclaimer import DISCLAIMER_NOTICE
 from portfolio_management.backtest import (
     STRATEGIES,
+    compute_bollinger_bands,
+    compute_ma_crossover_series,
+    compute_macd_series,
+    compute_rsi_series,
     generate_backtest_explanation,
     run_bollinger_reversal_backtest,
     run_grid_search,
@@ -664,3 +668,54 @@ def test_run_universe_backtest_ranking_row_is_json_serializable_with_real_pandas
     assert isinstance(row["is_stable"], bool)
     assert row["stability_cv"] is None or isinstance(row["stability_cv"], float)
     json.dumps({"ranking_rows": result})  # 例外を送出しないことを確認する
+
+
+def test_compute_ma_crossover_series_returns_rolling_means():
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    prices = pd.Series([100, 100, 102, 102, 105, 108], index=dates, dtype=float)
+
+    short_ma, long_ma = compute_ma_crossover_series(prices, short_window=2, long_window=4)
+
+    pd.testing.assert_series_equal(short_ma, prices.rolling(2).mean())
+    pd.testing.assert_series_equal(long_ma, prices.rolling(4).mean())
+
+
+def test_compute_rsi_series_matches_manual_formula():
+    dates = pd.date_range("2026-01-01", periods=9, freq="D")
+    prices = pd.Series([100, 90, 80, 70, 90, 110, 130, 130, 130], index=dates, dtype=float)
+
+    rsi = compute_rsi_series(prices, period=3)
+
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(3).mean()
+    avg_loss = loss.rolling(3).mean()
+    expected = 100 - (100 / (1 + avg_gain / avg_loss))
+    pd.testing.assert_series_equal(rsi, expected)
+
+
+def test_compute_macd_series_matches_manual_ema_formula():
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    prices = pd.Series([100, 100, 102, 102, 105, 108], index=dates, dtype=float)
+
+    macd_line, signal_line = compute_macd_series(prices, fast=2, slow=3, signal=2)
+
+    fast_ema = prices.ewm(span=2, adjust=False).mean()
+    slow_ema = prices.ewm(span=3, adjust=False).mean()
+    expected_macd = fast_ema - slow_ema
+    expected_signal = expected_macd.ewm(span=2, adjust=False).mean()
+    pd.testing.assert_series_equal(macd_line, expected_macd)
+    pd.testing.assert_series_equal(signal_line, expected_signal)
+
+
+def test_compute_bollinger_bands_matches_manual_formula():
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+    prices = pd.Series([100, 100, 70, 100, 100], index=dates, dtype=float)
+
+    middle_band, lower_band = compute_bollinger_bands(prices, window=3, num_std=1.0)
+
+    expected_middle = prices.rolling(3).mean()
+    expected_lower = expected_middle - 1.0 * prices.rolling(3).std()
+    pd.testing.assert_series_equal(middle_band, expected_middle)
+    pd.testing.assert_series_equal(lower_band, expected_lower)
