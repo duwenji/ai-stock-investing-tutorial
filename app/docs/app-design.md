@@ -51,7 +51,7 @@ app/
   data_api/
     stock_price_api.py          # fetch_price_history / fetch_fundamentals / fetch_news /
                                  # fetch_japanese_name / fetch_universe_fundamentals（並列フェッチ・キャッシュ付き）
-    llm_client.py                # call_llm, check_claude_cli_available（Claude Code CLIサブプロセス呼び出し）
+    llm_client.py                # call_llm, check_llm_available（Claude Code CLI / OpenAI APIをllm_provider設定で切り替え）
   prompt_patterns/
     screening.py                 # build_screening_prompt, apply_filters, generate_screening_comments
     report_generation.py         # build_report_prompt（ポートフォリオレビュー用）
@@ -320,7 +320,7 @@ flowchart TB
 
 上記5タブ（スクリーニング／一括バックテスト／セクターローテーションの結果テーブル、ポートフォリオの保有銘柄一覧、AI戦略ビルダーの銘柄選定結果テーブル）からは行クリックまたはボタンで**銘柄詳細ダイアログ**（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)参照）を開ける。特定のタブに属さないクロスカッティングな機能のため、上表には独立行を設けていない。
 
-共通の起動時チェックとして、`app.py` はStreamlit描画前に `check_claude_cli_available()` を呼び、Claude Code CLIが見つからない場合は `st.error` を表示して `st.stop()` で処理を止める（7タブ＋銘柄詳細ダイアログすべての前提条件）。
+共通の起動時チェックとして、`app.py` はStreamlit描画前に `check_llm_available()` を呼び、設定済みLLMプロバイダ（`.streamlit/secrets.toml`の`llm_provider`、デフォルト`claude_cli`）が利用できない場合は `st.error` を表示して `st.stop()` で処理を止める（7タブ＋銘柄詳細ダイアログすべての前提条件）。
 
 ---
 
@@ -917,11 +917,12 @@ sequenceDiagram
 
 ## 5. 横断的な設計事項
 
-### 5.1 LLM連携（Claude Code CLI）
+### 5.1 LLM連携（Claude Code CLI / OpenAI API）
 
-- `call_llm(prompt, timeout=120)` は `_resolve_claude_executable()`（内部で `shutil.which("claude")`）で解決した実行パスを使い、`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt, ...)` の形でプロンプトを**標準入力経由**で渡す。Windowsでは `claude` がnpmの `.cmd` シムに解決されバッチ引数展開でダブルクォート入りのJSONプロンプトが壊れるため、あえてargvではなくstdin経由にしている。
-- CLI未検出時は `ClaudeCLINotFoundError`（`shutil.which` が `None` を返した場合）、サブプロセスの非0終了時は `ClaudeCLIError` を送出する。前者は起動時の `check_claude_cli_available()` と、`call_llm()` 呼び出し直前の両方で発生しうる（アプリ起動後にCLIが削除された場合など）。
-- 起動時に `check_claude_cli_available()` でCLIの存在を確認し、無ければ全機能を使わせずアプリを停止する。
+- `call_llm(prompt, timeout=120)` は `.streamlit/secrets.toml` の `llm_provider` 設定（省略時は `"claude_cli"`）に応じて `_call_claude_cli()` / `_call_openai()` に振り分ける、プロバイダ非依存の共通呼び出し口。
+- `_call_claude_cli()` は `_resolve_claude_executable()`（内部で `shutil.which("claude")`）で解決した実行パスを使い、`subprocess.run([executable, "--system-prompt", ..., "-p"], input=prompt, ...)` の形でプロンプトを**標準入力経由**で渡す。Windowsでは `claude` がnpmの `.cmd` シムに解決されバッチ引数展開でダブルクォート入りのJSONプロンプトが壊れるため、あえてargvではなくstdin経由にしている。CLI未検出時は `ClaudeCLINotFoundError`、サブプロセスの非0終了時は `ClaudeCLIError` を送出する。
+- `_call_openai()` は OpenAI Chat Completions API（`openai_model` 設定、省略時は `"gpt-5"`）にシステムプロンプト＋ユーザープロンプトの2メッセージで送信する。`openai_api_key` 未設定時は `OpenAIAPIKeyMissingError`、API呼び出し失敗時は `OpenAIAPIError` を送出する。
+- 起動時に `check_llm_available()` で設定済みプロバイダの利用可否を確認し、不可なら全機能を使わせずアプリを停止する。
 - JSON形式の応答が必要な箇所（スクリーニング条件変換、各種コメント一括生成、ニュースセンチメント）は共通して「コードブロック不要・JSONのみ出力」と明示し、`common/json_parsing.strip_code_fence` でコードフェンスを除去してから `json.loads` する。パース失敗時は**機能ごとに定めたフォールバック**（「コメント生成失敗」文字列、空dict、エラー表示など）に倒す。
 - 複数対象に対する処理（ニュースセンチメント・スクリーニングコメント・ランキングコメント・セクターローテーションコメント）は個別呼び出しではなく**必ず1回のプロンプトにまとめてバッチ処理**する（サブプロセス起動オーバーヘッドの削減）。唯一の例外は銘柄詳細ダイアログのAIコメント（[4.6](#46-銘柄詳細ダイアログクロスタブ機能)）で、こちらは性質上つねに単一銘柄分だけを都度呼び出す。
 - 単一のAugmented LLM呼び出しでは表現しづらい構造には、複数LLM呼び出しを組み合わせるパターンを採用している。バックテスト解説（[4.3](#43-バックテスト単一銘柄)）は結果解説→改善提案の**Prompt Chaining**、AI質問箱（[4.8](#48-ai質問箱)）は分類→専用処理の**Routing**、AI戦略ビルダーの確定フロー（[4.7](#47-ai戦略ビルダー)）は評価→改善の**Evaluator-Optimizer**をそれぞれ使う。残りの機能はすべて単発またはバッチの1回呼び出しに留めている。
@@ -1098,8 +1099,10 @@ DB化前は `holdings.json`/`sector_display_settings.json`/`strategies.json` に
 
 | 事象                                                                                                | 挙動                                                                                                                                                          |
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code CLI未検出                                                                               | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）                                                                                  |
-| LLMサブプロセスの非0終了                                                                            | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                                                                           |
+| Claude Code CLI未検出（`llm_provider = "claude_cli"`時）                                          | アプリ起動時に`st.error` 表示＋`st.stop()`（`ClaudeCLINotFoundError`）                                                                                  |
+| LLMサブプロセスの非0終了（`llm_provider = "claude_cli"`時）                                         | `ClaudeCLIError` を送出（呼び出し元でエラー表示）                                                                                                           |
+| OpenAI APIキー未設定（`llm_provider = "openai"`時）                                                 | アプリ起動時に`st.error` 表示＋`st.stop()`（`OpenAIAPIKeyMissingError`）                                                                                 |
+| OpenAI API呼び出し失敗（`llm_provider = "openai"`時）                                               | `OpenAIAPIError` を送出（呼び出し元でエラー表示）                                                                                                           |
 | LLM応答のJSONパース失敗（スクリーニング条件）                                                       | 「条件の解釈に失敗しました」エラー表示、以降の処理を行わない                                                                                                  |
 | LLM応答のJSONパース失敗（各種コメント・センチメント）                                               | 該当箇所のみ「生成失敗」文字列や空値にフォールバックし、他の表示は継続                                                                                        |
 | 対象ユーザーの保有銘柄が0件（`load_holdings`）                                                    | 空リストを返す                                                                                                                                                |

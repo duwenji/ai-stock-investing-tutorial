@@ -17,8 +17,9 @@
 ## 必要な環境
 
 - Python 3.14系（[uv](https://docs.astral.sh/uv/)で管理）
-- [Claude Code CLI](https://docs.claude.com/claude-code)（`claude`コマンド）がインストール・ログイン済みであること
-  - LLM呼び出しはOpenAI/Anthropic APIキーを使わず、`claude -p`のサブプロセス実行で行います
+- LLM呼び出しは、`.streamlit/secrets.toml`の`llm_provider`設定によりいずれかを選択します（デフォルトは`claude_cli`）:
+  - `claude_cli`（デフォルト）: [Claude Code CLI](https://docs.claude.com/claude-code)（`claude`コマンド）がインストール・ログイン済みであること
+  - `openai`: OpenAI APIキーが必要（`.streamlit/secrets.toml`に設定）
 
 ## セットアップ
 
@@ -32,6 +33,14 @@ uv sync
 ```bash
 mkdir -p .streamlit
 python -c "import secrets; print(f'auth_cookie_key = \"{secrets.token_hex(32)}\"')" > .streamlit/secrets.toml
+```
+
+LLMプロバイダを切り替える場合は、`.streamlit/secrets.toml`に以下を追記してください（省略時は`claude_cli`が使われます）。
+
+```toml
+llm_provider = "openai"       # "claude_cli"（デフォルト） | "openai"
+openai_api_key = "sk-..."     # llm_provider = "openai" の場合必須
+openai_model = "gpt-5"        # 省略可。デフォルト "gpt-5"
 ```
 
 初回起動後、画面の「新規登録」フォームからアカウントを作成してください。
@@ -62,7 +71,7 @@ uv run pytest -v
 
 ```
 app.py                      # Streamlitエントリーポイント（5タブ + 銘柄詳細ダイアログ）
-data_api/                   # yfinance連携・LLM連携（Claude Code CLI）
+data_api/                   # yfinance連携・LLM連携（Claude Code CLI / OpenAI API切り替え）
 prompt_patterns/            # プロンプト生成・スクリーニング条件変換
 analysis_agents/            # ファンダメンタル・テクニカル・ニュース分析
 portfolio_management/       # 保有銘柄の永続化・構成比/リスク計算・レビュー統合
@@ -70,5 +79,5 @@ screening/                  # 固定スクリーニングユニバース・業�
 sector_analysis/            # 業種別リターン・時差相関（リード・ラグ）・ウェーブレット分析（コヒーレンス/時間変化するラグ）計算
 stock_detail/               # 銘柄詳細情報の統合取得・AIコメント生成
 common/                     # 免責事項定数・キャッシュ・並列実行・JSON解析ヘルパー
-tests/                      # pytest（yfinance・Claude Code CLI呼び出しはモック化）
+tests/                      # pytest（yfinance・LLM呼び出しはモック化）
 ```
