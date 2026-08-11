@@ -62,11 +62,8 @@ def check_claude_cli_available() -> None:
     _resolve_claude_executable()
 
 
-def call_llm(prompt: str, timeout: int = 120) -> str:
-    """Claude Code CLIにプロンプトを渡し、応答テキストを取得する。
-
-    各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
-    """
+def _call_claude_cli(prompt: str, timeout: int) -> str:
+    """Claude Code CLIにプロンプトを渡し、応答テキストを取得する。"""
     executable = _resolve_claude_executable()
     with log_duration(logger, f"Claude CLI呼び出し（prompt長={len(prompt)}）"):
         logger.info("Claude CLIリクエスト: %s", prompt)
@@ -87,3 +84,11 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
             raise ClaudeCLIError(f"Claude Code CLIの実行に失敗しました: {result.stderr.strip()}")
         logger.info("Claude CLIレスポンス: %s", result.stdout)
     return result.stdout.strip()
+
+
+def call_llm(prompt: str, timeout: int = 120) -> str:
+    """設定されたLLMプロバイダにプロンプトを渡し、応答テキストを取得する。
+
+    各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
+    """
+    return _call_claude_cli(prompt, timeout)
