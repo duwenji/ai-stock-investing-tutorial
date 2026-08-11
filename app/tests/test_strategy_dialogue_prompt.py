@@ -8,7 +8,7 @@ from prompt_patterns.strategy_dialogue import (
 def test_build_dialogue_prompt_includes_persona_instructions():
     prompt = build_dialogue_prompt([{"role": "user", "content": "PERが低い銘柄"}])
     assert "クオンツ・アナリスト" in prompt
-    assert "conditions" in prompt
+    assert "steps" in prompt
 
 
 def test_build_dialogue_prompt_includes_full_history_in_order():
@@ -85,3 +85,23 @@ def test_build_refinement_prompt_lists_allowed_indicators_and_operators():
     prompt = build_refinement_prompt(pending, "改善してください")
     assert "DIVIDEND_YIELD" in prompt
     assert "GREATER_EQUAL" in prompt
+
+
+def test_build_dialogue_prompt_lists_all_pipeline_functions():
+    prompt = build_dialogue_prompt([{"role": "user", "content": "PERが低い銘柄"}])
+    assert "BACKTEST_RANK" in prompt
+    assert "MULTI_STRATEGY_RANK" in prompt
+    assert "FILTER_CURRENT_SIGNAL" in prompt
+    assert "FILTER_BY_FUNDAMENTALS" in prompt
+    assert "SORT_BY" in prompt
+    assert "TOP_N" in prompt
+
+
+def test_parse_dialogue_response_detects_finalized_strategy_json_with_steps():
+    raw = (
+        '```json\n{"strategy_name": "ゴールデンクロス", "steps": '
+        '[{"function": "BACKTEST_RANK", "params": {"strategy": "移動平均クロスオーバー"}}]}\n```'
+    )
+    result = parse_dialogue_response(raw)
+    assert result["kind"] == "strategy"
+    assert result["strategy"]["strategy_name"] == "ゴールデンクロス"
