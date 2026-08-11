@@ -26,7 +26,10 @@ JSONとして生成し、Python側が生成された`steps`をそのまま実行
 ボリンジャーバンド逆張り）のどれでも指定できる。`FILTER_CURRENT_SIGNAL`（直近シグナル
 フィルタ）もこの4戦略すべてに対応させ、どの戦略を選んでも「①バックテストで上位を選ぶ→
 ②その戦略の直近シグナルで絞り込む→③再ランキング」という同じ3ステップパイプラインが
-組み立てられるようにする。
+組み立てられるようにする。さらに「1戦略に決めず総合的に評価してほしい」という要望にも
+応えられるよう、4戦略すべてでバックテストし銘柄ごとに最良戦略を採用する
+`MULTI_STRATEGY_RANK`を`BACKTEST_RANK`と選択可能な形で用意する（詳細は「新規モジュール」
+節）。
 
 ## スコープ
 
@@ -120,9 +123,11 @@ PIPELINE_FUNCTIONS: dict[str, dict] = {
     },
     "FILTER_CURRENT_SIGNAL": {
         "description": (
-            "各銘柄について、直前のBACKTEST_RANKで使った戦略（_source_strategy列）"
-            "そのものが直近5営業日以内に「エントリー」または「エグジット」シグナルを"
-            "出したかどうかで絞り込む。戦略ごとの意味は次のとおり:\n"
+            "各銘柄について、その銘柄自身の_source_strategy列の値（直前のBACKTEST_RANK"
+            "またはMULTI_STRATEGY_RANKが付与）が直近5営業日以内に「エントリー」または"
+            "「エグジット」シグナルを出したかどうかで絞り込む。BACKTEST_RANK由来なら"
+            "全銘柄同じ戦略、MULTI_STRATEGY_RANK由来なら銘柄ごとに異なる戦略になりうるが、"
+            "どちらも銘柄単位で判定するため区別なく扱える。戦略ごとの意味は次のとおり:\n"
             "・移動平均クロスオーバー: ENTRY＝短期MAが長期MAを下から上に抜けた"
             "（ゴールデンクロス）、EXIT＝その逆（デッドクロス）\n"
             "・MACDクロスオーバー: ENTRY＝MACD線がシグナル線を下から上に抜けた、"
@@ -131,14 +136,16 @@ PIPELINE_FUNCTIONS: dict[str, dict] = {
             "回復）、EXIT＝RSIが買われすぎ水準を上抜けた\n"
             "・ボリンジャーバンド逆張り: ENTRY＝終値が下バンドを下抜けた、EXIT＝終値が"
             "中心線（移動平均）を上抜けた\n"
-            "各戦略のパラメータ（窓・閾値）は銘柄ごとのbest_params列（直前のBACKTEST_RANK"
-            "が付与）を使う。best_paramsが無い、またはstrategy未指定の場合はparamsで"
-            "明示されたstrategyとSTRATEGIESの既定パラメータを使う。"
+            "各戦略のパラメータ（窓・閾値）は銘柄ごとのbest_params列（直前のBACKTEST_RANK/"
+            "MULTI_STRATEGY_RANKが付与）を使う。銘柄のbest_paramsが無い場合はその銘柄の"
+            "strategyに対応するSTRATEGIESの既定パラメータを使う。"
         ),
         "params_schema": {
             "signal": "ENTRY または EXIT",
             "strategy": (
-                "省略可。STRATEGIESのキー文字列。省略時は候補の_source_strategy列を使う"
+                "省略可。STRATEGIESのキー文字列。指定時は全銘柄をこの戦略で統一判定する"
+                "（_source_strategy列は無視）。省略時は銘柄ごとの_source_strategy列の値を"
+                "使う（MULTI_STRATEGY_RANK由来の場合は銘柄ごとに異なりうる）"
             ),
         },
     },
@@ -173,16 +180,22 @@ PIPELINE_FUNCTIONS: dict[str, dict] = {
 `SORT_BY`は既存`sort_by_strategy`を汎用化したロジックをそれぞれラップ・再利用する。
 
 `BACKTEST_RANK`の出力には、既存の`total_return_pct`等に加えて`_source_strategy`列
-（使用したSTRATEGIESキーをそのまま全行に設定）を追加する。`FILTER_CURRENT_SIGNAL`が
-どの戦略の指標を計算すべきかを判断するために使う。
+（使用したSTRATEGIESキーをそのまま**全行同じ値**で設定）を追加する。`FILTER_CURRENT_SIGNAL`
+がどの戦略の指標を計算すべきかを判断するために使う。
 
 `MULTI_STRATEGY_RANK`は対象銘柄の価格系列を1回だけ取得し（`fetch_universe_price_histories`）、
 同じ`prices_by_ticker`に対して`run_universe_backtest_ranking`をSTRATEGIESの4戦略分
 順番に呼ぶ（価格取得の重複を避ける）。銘柄ごとに4戦略の結果をまとめ、
-`risk_adjusted_return`最大の戦略を`_source_strategy`/`best_params`として採用しつつ、
-`avg_risk_adjusted_return`と`profitable_strategy_count`を算出する。計算コストが
-`BACKTEST_RANK`の単純4倍になるため、キャッシュキーに4戦略名すべて＋`aggregation`を
-含め、`BACKTEST_RANK`と同じ共有キャッシュ機構（下記「既存コードの小さな整理」）を使う。
+`risk_adjusted_return`最大の戦略を`_source_strategy`/`best_params`として採用する
+（＝`_source_strategy`は**銘柄ごとに異なりうる**。BACKTEST_RANKの全行同一値とは
+この点が異なる）。あわせて`avg_risk_adjusted_return`と`profitable_strategy_count`を
+算出する。計算コストが`BACKTEST_RANK`の単純4倍になるため、キャッシュキーに4戦略名
+すべて＋`aggregation`を含め、`BACKTEST_RANK`と同じ共有キャッシュ機構（下記
+「既存コードの小さな整理」）を使う。
+
+`_source_strategy`が全行同一か銘柄ごとに異なるかの違いは、後続の`FILTER_CURRENT_SIGNAL`
+が必ず**銘柄単位**でstrategyを解決する設計（次項）になっている限り、呼び出し側からは
+意識不要になる。
 
 #### `FILTER_CURRENT_SIGNAL`（4戦略対応）
 
@@ -228,16 +241,19 @@ def _detect_recent_threshold_cross(
 `run_*_backtest`関数とこの`FILTER_CURRENT_SIGNAL`の両方から呼び出す（指標計算ロジックの
 重複を避ける）。
 
-`FILTER_CURRENT_SIGNAL`の実行手順:
+`FILTER_CURRENT_SIGNAL`の実行手順（**銘柄ごと**に行う。BACKTEST_RANK由来なら結果的に
+全銘柄同じstrategyになり、MULTI_STRATEGY_RANK由来なら銘柄ごとに異なるstrategyになる
+だけで、ロジックは共通）:
 
-1. `strategy = params.get("strategy") or candidates_df["_source_strategy"].iloc[0]`
-   （どちらも無ければそのステップをスキップしトレースにエラーを記録）
-2. 候補銘柄の価格系列を`fetch_universe_price_histories(tickers, period="1y")`で取得
-   （この時点で候補は数十〜100件程度のため軽量）
-3. 銘柄ごとに`best_params`列（無ければSTRATEGIESの既定パラメータにフォールバックし、
-   トレースに1回だけwarningを記録）を使って対応する指標系列を計算し、`strategy`と
-   `signal`（ENTRY/EXIT）に応じた判定関数（`_detect_recent_cross`または
-   `_detect_recent_threshold_cross`）を呼ぶ
+1. その銘柄の`strategy = params.get("strategy") or row["_source_strategy"]`を決める
+   （どちらも無ければ**その銘柄の行のみ**をスキップしトレースに記録。他行の判定は継続）
+2. 候補銘柄全体の価格系列を`fetch_universe_price_histories(tickers, period="1y")`で
+   まとめて取得（この時点で候補は数十〜100件程度のため軽量。ステップ1の`strategy`解決
+   より前に一括取得してよい）
+3. その銘柄の`best_params`列（無ければ手順1で決めた`strategy`に対応するSTRATEGIESの
+   既定パラメータにフォールバックし、トレースに1回だけwarningを記録）を使って対応する
+   指標系列を計算し、`strategy`と`signal`（ENTRY/EXIT）に応じた判定関数
+   （`_detect_recent_cross`または`_detect_recent_threshold_cross`）を呼ぶ
 4. Trueの行だけを残す
 
 | strategy | signal=ENTRY | signal=EXIT |
@@ -246,6 +262,10 @@ def _detect_recent_threshold_cross(
 | MACDクロスオーバー | `_detect_recent_cross(macd_line, signal_line, "up")` | 同, `"down"` |
 | ボリンジャーバンド逆張り | `_detect_recent_cross(close, lower_band, "down")` | `_detect_recent_cross(close, middle_band, "up")` |
 | RSI逆張り | `_detect_recent_threshold_cross(rsi, oversold, "up")` | `_detect_recent_threshold_cross(rsi, overbought, "up")` |
+
+上表は`strategy`が行ごとに何であっても同じディスパッチ表を使う、という意味であり、
+`MULTI_STRATEGY_RANK`の出力（銘柄Aは移動平均クロスオーバー、銘柄BはRSI逆張り、等）を
+渡した場合は銘柄ごとに異なる行のロジックが適用される。
 
 ### `strategy_builder/pipeline.py`
 
@@ -333,7 +353,10 @@ def run_pipeline(steps: list[dict], all_tickers: list[str]) -> tuple[pd.DataFram
   データ不足（NaN混在含む）→False、クロス無し→False、下方向（EXIT）
 - `FILTER_CURRENT_SIGNAL`: 4戦略それぞれでENTRY/EXITが正しい指標・判定関数に
   ディスパッチされること、`_source_strategy`列からのstrategy自動解決、
-  best_params欠如時のSTRATEGIES既定値へのフォールバック
+  best_params欠如時のSTRATEGIES既定値へのフォールバック。特に
+  **`_source_strategy`が銘柄ごとに異なるDataFrame**（MULTI_STRATEGY_RANK由来を想定した
+  fixture、例: 銘柄Aが移動平均クロスオーバー・銘柄BがRSI逆張り）を渡した際、各行が
+  他行の値に引きずられず自分自身のstrategyで判定されること（先頭行決め打ちの回帰防止）
 - `backtest.py`から切り出す指標計算ヘルパー（`compute_ma_crossover_series`等）:
   既存`run_*_backtest`のポジション計算結果が切り出し前後で変わらないことの回帰確認
 - `pipeline.py`の`run_pipeline`: 未知function名のスキップ、複数ステップの列引き継ぎ、
