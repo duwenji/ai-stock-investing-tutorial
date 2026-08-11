@@ -31,9 +31,9 @@ JSONとして生成し、Python側が生成された`steps`をそのまま実行
 ## スコープ
 
 - 対象: `app_tabs/strategy_builder_tab.py`（AI戦略ビルダータブ）の拡張
-- v1関数レジストリ: `BACKTEST_RANK` / `FILTER_CURRENT_SIGNAL` / `FILTER_BY_FUNDAMENTALS` /
-  `SORT_BY` / `TOP_N` の5関数。`BACKTEST_RANK`と`FILTER_CURRENT_SIGNAL`はSTRATEGIESの
-  4戦略すべてに対応する
+- v1関数レジストリ: `BACKTEST_RANK` / `MULTI_STRATEGY_RANK` / `FILTER_CURRENT_SIGNAL` /
+  `FILTER_BY_FUNDAMENTALS` / `SORT_BY` / `TOP_N` の6関数。`BACKTEST_RANK`と
+  `FILTER_CURRENT_SIGNAL`はSTRATEGIESの4戦略すべてに対応する
 - 既存の`conditions`ベース戦略（保存済みDB上の既存データ、③④の既存UIロジック）は
   非破壊のまま維持する（後方互換）。新規に対話で作られる戦略は`steps`形式になる。
 - ネイティブなLLM Function Calling API（tool_use）は使わない。既存の
@@ -66,6 +66,11 @@ JSONとして生成し、Python側が生成された`steps`をそのまま実行
 `BACKTEST_RANK(strategy=RSI逆張り) → FILTER_BY_FUNDAMENTALS(dividend_yield_pct>=3)`
 のような別のstepsをそのまま生成でき、コード変更は不要。
 
+「どれか1戦略に決めず総合的に評価してほしい」という要望であれば、AIは代わりに
+`MULTI_STRATEGY_RANK(top_n=100) → FILTER_CURRENT_SIGNAL(signal=ENTRY) → SORT_BY(...)`
+を生成する。`MULTI_STRATEGY_RANK`の出力列は`BACKTEST_RANK`と互換のため、後続の
+`FILTER_CURRENT_SIGNAL`/`SORT_BY`はどちらが前段にあっても同じstepsのまま動く。
+
 ## 新規モジュール
 
 ### `strategy_builder/pipeline_functions.py`
@@ -88,6 +93,29 @@ PIPELINE_FUNCTIONS: dict[str, dict] = {
             "period": "1y/3y/5y",
             "transaction_cost_pct": "数値（省略時0）",
             "top_n": "整数（省略時は絞り込みなし）",
+        },
+    },
+    "MULTI_STRATEGY_RANK": {
+        "description": (
+            "1戦略に決め打たず、STRATEGIESの4戦略すべてで対象銘柄群をバックテストし、"
+            "銘柄ごとに「4戦略中もっともリスク調整済みリターンが高かった戦略」を採用して"
+            "総合的にランキングする。「総合的に評価」「複数戦略で判断」のような要望で使う。"
+            "出力列はBACKTEST_RANKと同じ（total_return_pct, benchmark_return_pct, "
+            "win_rate_pct, max_drawdown_pct, risk_adjusted_return, best_params, "
+            "_source_strategy＝銘柄ごとのベスト戦略名）に加え、avg_risk_adjusted_return"
+            "（4戦略平均のリスク調整済みリターン）とprofitable_strategy_count（4戦略中"
+            "プラス収益だった戦略数、0〜4）を追加する。出力列がBACKTEST_RANKと互換のため、"
+            "後続のFILTER_CURRENT_SIGNAL等はBACKTEST_RANKの結果と同様に扱える。"
+        ),
+        "params_schema": {
+            "period": "1y/3y/5y",
+            "transaction_cost_pct": "数値（省略時0）",
+            "top_n": "整数（省略時は絞り込みなし）",
+            "aggregation": (
+                "MEAN（デフォルト、avg_risk_adjusted_return降順）/ "
+                "CONSENSUS（profitable_strategy_count降順、次点avg_risk_adjusted_return）/ "
+                "BEST（採用戦略自身のrisk_adjusted_return降順）"
+            ),
         },
     },
     "FILTER_CURRENT_SIGNAL": {
@@ -147,6 +175,14 @@ PIPELINE_FUNCTIONS: dict[str, dict] = {
 `BACKTEST_RANK`の出力には、既存の`total_return_pct`等に加えて`_source_strategy`列
 （使用したSTRATEGIESキーをそのまま全行に設定）を追加する。`FILTER_CURRENT_SIGNAL`が
 どの戦略の指標を計算すべきかを判断するために使う。
+
+`MULTI_STRATEGY_RANK`は対象銘柄の価格系列を1回だけ取得し（`fetch_universe_price_histories`）、
+同じ`prices_by_ticker`に対して`run_universe_backtest_ranking`をSTRATEGIESの4戦略分
+順番に呼ぶ（価格取得の重複を避ける）。銘柄ごとに4戦略の結果をまとめ、
+`risk_adjusted_return`最大の戦略を`_source_strategy`/`best_params`として採用しつつ、
+`avg_risk_adjusted_return`と`profitable_strategy_count`を算出する。計算コストが
+`BACKTEST_RANK`の単純4倍になるため、キャッシュキーに4戦略名すべて＋`aggregation`を
+含め、`BACKTEST_RANK`と同じ共有キャッシュ機構（下記「既存コードの小さな整理」）を使う。
 
 #### `FILTER_CURRENT_SIGNAL`（4戦略対応）
 
@@ -265,12 +301,14 @@ def run_pipeline(steps: list[dict], all_tickers: list[str]) -> tuple[pd.DataFram
 
 ## 既存コードの小さな整理
 
-**キャッシュ共有**: `BACKTEST_RANK`はユニバース全体のグリッドサーチを伴う最も重い処理であり、
+**キャッシュ共有**: `BACKTEST_RANK`・`MULTI_STRATEGY_RANK`はユニバース全体のグリッド
+サーチを伴う最も重い処理であり（`MULTI_STRATEGY_RANK`は単純計算で4倍）、
 `app_tabs/ranking_tab.py`が既に持つキャッシュ機構（戦略名・期間・コスト・対象銘柄集合の
 ハッシュをキーに`common/cache.py`のread_cache/write_cacheを使う）と同じ考え方が必要になる。
 このキャッシュキー生成・読み書きロジックを`ranking_tab.py`から
 `portfolio_management/backtest.py`に小関数として切り出し、`ranking_tab.py`と新規
-`pipeline_functions.py`の両方から共有する。
+`pipeline_functions.py`（`BACKTEST_RANK`・`MULTI_STRATEGY_RANK`双方）から共有する。
+`MULTI_STRATEGY_RANK`のキャッシュキーには4戦略名＋`aggregation`も含める。
 
 **指標計算ロジックの共有**: `portfolio_management/backtest.py`の`run_ma_crossover_backtest`/
 `run_rsi_reversal_backtest`/`run_macd_crossover_backtest`/`run_bollinger_reversal_backtest`は
@@ -287,6 +325,10 @@ def run_pipeline(steps: list[dict], all_tickers: list[str]) -> tuple[pd.DataFram
 一時DBを使う）に従う。
 
 - `pipeline_functions.py`: 各関数の正常系・空データ・不正params（登録外の値等）
+- `MULTI_STRATEGY_RANK`: 銘柄ごとに4戦略中最良のものが`_source_strategy`/`best_params`に
+  採用されること、`avg_risk_adjusted_return`/`profitable_strategy_count`の算出、
+  `aggregation`（MEAN/CONSENSUS/BEST）ごとのtop_n選定順序の違い、出力列が
+  `BACKTEST_RANK`と同じ形でFILTER_CURRENT_SIGNAL/SORT_BYにそのまま渡せること
 - `_detect_recent_cross`/`_detect_recent_threshold_cross`: 窓内クロス→True、窓外→False、
   データ不足（NaN混在含む）→False、クロス無し→False、下方向（EXIT）
 - `FILTER_CURRENT_SIGNAL`: 4戦略それぞれでENTRY/EXITが正しい指標・判定関数に
