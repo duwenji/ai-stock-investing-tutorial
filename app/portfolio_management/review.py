@@ -60,11 +60,12 @@ def generate_portfolio_review(
     ]
 
     # LLMに渡す「事実（facts）」として、構成・リスク・銘柄詳細を1つにまとめる。
+    # 銘柄名は composition["holdings"] と holdings の各 name フィールドに
+    # 既に含まれているため、重複を避けるためここでは含めない（トークン節約）。
     facts = {
         "composition": composition,
         "risk": risk,
         "holdings": snapshots,
-        "ticker_names": names_by_ticker,
     }
     prompt = build_report_prompt(facts)
     commentary = call_llm(prompt)

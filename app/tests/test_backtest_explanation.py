@@ -1,4 +1,3 @@
-from common.disclaimer import DISCLAIMER_NOTICE
 from prompt_patterns.backtest_explanation import (
     build_backtest_prompt,
     build_improvement_prompt,
@@ -16,7 +15,6 @@ def test_build_backtest_prompt_includes_ticker_and_facts():
     assert "7203.T" in prompt
     assert "18.4" in prompt
     assert "312" in prompt
-    assert DISCLAIMER_NOTICE in prompt
 
 
 def test_build_backtest_prompt_includes_stability_info():
@@ -106,7 +104,6 @@ def test_build_improvement_prompt_includes_ticker_facts_and_prior_explanation():
     assert "7203.T" in prompt
     assert "18.4" in prompt
     assert "これまでの解説文です。" in prompt
-    assert DISCLAIMER_NOTICE in prompt
 
 
 def test_build_improvement_prompt_instructs_overfitting_and_no_directive_language():

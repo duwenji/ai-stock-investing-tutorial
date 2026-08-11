@@ -2,7 +2,6 @@
 # 数値計算はすべてPython側で完了させ、LLMには「結果の解釈・説明」のみを担わせる。
 import json
 
-from common.disclaimer import DISCLAIMER_NOTICE
 from common.json_parsing import strip_code_fence
 from data_api.llm_client import call_llm as default_call_llm
 
@@ -14,8 +13,9 @@ def build_backtest_prompt(
     strategy_name: str = "移動平均クロスオーバー",
 ) -> str:
     # 再計算を防ぐため、Python側で算出済みのバックテスト結果をJSONとしてそのまま埋め込む。
-    comparison_json = json.dumps(comparison, ensure_ascii=False, indent=2, default=str)
-    stability_json = json.dumps(stability, ensure_ascii=False, indent=2, default=str)
+    # LLMには整形不要のためindentは付けず、トークン消費を抑える。
+    comparison_json = json.dumps(comparison, ensure_ascii=False, default=str)
+    stability_json = json.dumps(stability, ensure_ascii=False, default=str)
     return (
         f"以下は{strategy_name}戦略のバックテスト結果です"
         "（Python側でパラメータの近傍グリッドサーチまで計算済みのため再計算は不要です）。\n\n"
@@ -33,8 +33,7 @@ def build_backtest_prompt(
         "5. 追加で確認する価値がある指標やシナリオの提案（実行はしない）\n\n"
         # 投資助言と誤解されないよう、指示的な表現を明示的に禁止する。
         "出力は事実の説明と教育的な提案にとどめ、「買うべき」「このルールで"
-        "今すぐ売買すべき」のような指示的な表現は使わないでください。\n\n"
-        f"{DISCLAIMER_NOTICE}"
+        "今すぐ売買すべき」のような指示的な表現は使わないでください。"
     )
 
 
@@ -47,8 +46,9 @@ def build_improvement_prompt(
 ) -> str:
     # Step1（結果解説）の出力を入力として受け取り、追加で検討すべき観点を
     # 生成させる2段階目のプロンプト（Prompt Chaining）。
-    comparison_json = json.dumps(comparison, ensure_ascii=False, indent=2, default=str)
-    stability_json = json.dumps(stability, ensure_ascii=False, indent=2, default=str)
+    # LLMには整形不要のためindentは付けず、トークン消費を抑える。
+    comparison_json = json.dumps(comparison, ensure_ascii=False, default=str)
+    stability_json = json.dumps(stability, ensure_ascii=False, default=str)
     return (
         f"以下は{strategy_name}戦略のバックテスト結果（Python側で計算済み）と、"
         "その結果について別のAIが作成した解説文です。\n\n"
@@ -62,8 +62,7 @@ def build_improvement_prompt(
         "1. is_stableがfalseの場合、過学習を避けるために確認すべき追加のデータ期間やパラメータ幅\n"
         "2. 取引コストやスリッページなど、本バックテストが考慮していない要因\n\n"
         "出力は教育的な提案にとどめ、「買うべき」「このルールで今すぐ売買すべき」"
-        "のような指示的な表現は使わないでください。\n\n"
-        f"{DISCLAIMER_NOTICE}"
+        "のような指示的な表現は使わないでください。"
     )
 
 

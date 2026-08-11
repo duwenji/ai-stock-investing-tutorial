@@ -1,12 +1,11 @@
 # ポートフォリオ全体のサマリーレポートをLLMに生成させるためのプロンプトを組み立てるモジュール。
 import json
 
-from common.disclaimer import DISCLAIMER_NOTICE
-
 
 def build_report_prompt(facts: dict) -> str:
     # ポートフォリオの数値的事実はPython側で計算済みのため、LLMには解釈・要約のみを依頼する。
-    facts_json = json.dumps(facts, ensure_ascii=False, indent=2, default=str)
+    # LLMには整形不要のためindentは付けず、トークン消費を抑える。
+    facts_json = json.dumps(facts, ensure_ascii=False, default=str)
     return (
         "以下はポートフォリオの事実データ（Python側で計算済み）です。\n\n"
         f"{facts_json}\n\n"
@@ -16,8 +15,7 @@ def build_report_prompt(facts: dict) -> str:
         # 銘柄名の表記揺れを防ぎ、読み手が銘柄を特定しやすくするための指示。
         "各銘柄に言及する際は、必ず「銘柄コード（銘柄名）」の形式で表記して"
         "ください（例: 7203.T（トヨタ自動車））。銘柄名は各データ内の"
-        "name フィールドおよび ticker_names を参照してください。\n"
+        "name フィールドを参照してください。\n"
         # 投資助言化を避けるための制約。
-        "売買の推奨・指示・目標株価の提示は行わないでください。\n\n"
-        f"{DISCLAIMER_NOTICE}"
+        "売買の推奨・指示・目標株価の提示は行わないでください。"
     )

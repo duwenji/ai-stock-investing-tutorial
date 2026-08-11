@@ -8,7 +8,8 @@ from data_api.llm_client import call_llm as default_call_llm
 
 def build_sector_rotation_prompt(top_pairs: list[dict]) -> str:
     # 事前に算出済みのリード・ラグ相関ペアをそのままJSONで渡し、LLMには解釈のみ任せる。
-    pairs_json = json.dumps(top_pairs, ensure_ascii=False, indent=2)
+    # LLMには整形不要のためindentは付けず、トークン消費を抑える。
+    pairs_json = json.dumps(top_pairs, ensure_ascii=False)
     return (
         "以下は業種（セクター）間の値動きの時差相関（リード・ラグ）を、"
         "過去の株価データから計算した結果です"
