@@ -94,3 +94,87 @@ def test_run_backtest_rank_reuses_cache_on_second_call(monkeypatch, tmp_path):
     pipeline_functions._run_backtest_rank(candidates_df, params, tmp_path)
 
     assert call_count["n"] == 1
+
+
+def test_merge_strategy_results_selects_best_strategy_and_computes_aggregates():
+    rows_by_strategy = {
+        "戦略A": [
+            {"ticker": "AAA.T", "total_return_pct": 10.0, "benchmark_return_pct": 4.0,
+             "win_rate_pct": 100.0, "max_drawdown_pct": -5.0, "risk_adjusted_return": 2.0,
+             "best_params": {"x": 1}},
+        ],
+        "戦略B": [
+            {"ticker": "AAA.T", "total_return_pct": -3.0, "benchmark_return_pct": 4.0,
+             "win_rate_pct": 0.0, "max_drawdown_pct": -6.0, "risk_adjusted_return": -0.5,
+             "best_params": {"y": 2}},
+        ],
+    }
+
+    merged = pipeline_functions._merge_strategy_results(rows_by_strategy)
+
+    assert merged == [
+        {
+            "ticker": "AAA.T",
+            "total_return_pct": 10.0,
+            "benchmark_return_pct": 4.0,
+            "win_rate_pct": 100.0,
+            "max_drawdown_pct": -5.0,
+            "risk_adjusted_return": 2.0,
+            "best_params": {"x": 1},
+            "_source_strategy": "戦略A",
+            "avg_risk_adjusted_return": 0.75,
+            "profitable_strategy_count": 1,
+        }
+    ]
+
+
+def test_merge_strategy_results_handles_ticker_missing_from_some_strategies():
+    rows_by_strategy = {
+        "戦略A": [{"ticker": "AAA.T", "total_return_pct": 5.0, "benchmark_return_pct": 0.0,
+                   "win_rate_pct": 100.0, "max_drawdown_pct": -1.0, "risk_adjusted_return": 5.0,
+                   "best_params": {}}],
+        "戦略B": [],
+    }
+
+    merged = pipeline_functions._merge_strategy_results(rows_by_strategy)
+
+    assert len(merged) == 1
+    assert merged[0]["avg_risk_adjusted_return"] == 5.0
+    assert merged[0]["profitable_strategy_count"] == 1
+
+
+def test_run_multi_strategy_rank_picks_best_strategy_per_ticker(monkeypatch, tmp_path):
+    dates = pd.date_range("2026-01-01", periods=5, freq="D")
+
+    def fake_fetch(tickers, period):
+        return {t: pd.Series([100.0, 101.0, 102.0, 103.0, 104.0], index=dates) for t in tickers}
+
+    monkeypatch.setattr(pipeline_functions, "fetch_universe_price_histories", fake_fetch)
+
+    def strategy_a(prices, transaction_cost_pct=0.0, **params):
+        return {"total_return_pct": 10.0, "benchmark_return_pct": 4.0, "win_rate_pct": 100.0,
+                "max_drawdown_pct": -5.0, "trade_days": 1}
+
+    def strategy_b(prices, transaction_cost_pct=0.0, **params):
+        return {"total_return_pct": 20.0, "benchmark_return_pct": 4.0, "win_rate_pct": 100.0,
+                "max_drawdown_pct": -5.0, "trade_days": 1}
+
+    monkeypatch.setattr(
+        pipeline_functions,
+        "STRATEGIES",
+        {
+            "戦略A": {"func": strategy_a, "param_grid": {"x": [1]}, "min_days": 1},
+            "戦略B": {"func": strategy_b, "param_grid": {"x": [1]}, "min_days": 1},
+        },
+    )
+
+    candidates_df = pd.DataFrame({"ticker": ["AAA.T"]})
+    result_df = pipeline_functions._run_multi_strategy_rank(
+        candidates_df, {"period": "1y", "top_n": 10}, tmp_path
+    )
+
+    row = result_df.iloc[0]
+    assert row["_source_strategy"] == "戦略B"
+    assert row["risk_adjusted_return"] == 4.0
+    assert row["avg_risk_adjusted_return"] == 3.0
+    assert row["profitable_strategy_count"] == 2
