@@ -740,6 +740,51 @@ def test_fetch_company_profile_refetches_when_stale(monkeypatch, tmp_path):
     assert result["sector"] == "Consumer Cyclical"
 
 
+def test_fetch_company_profile_retries_and_succeeds_after_rate_limit_error(
+    monkeypatch, tmp_path
+):
+    call_count = {"n": 0}
+
+    class RateLimitedThenOkTicker(FakeTicker):
+        @property
+        def info(self):
+            call_count["n"] += 1
+            if call_count["n"] < 3:
+                raise stock_price_api.YFRateLimitError()
+            return super().info
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", RateLimitedThenOkTicker)
+    monkeypatch.setattr(stock_price_api.time, "sleep", lambda seconds: None)
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    result = stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    assert call_count["n"] == 3
+    assert result["sector"] == "Consumer Cyclical"
+
+
+def test_fetch_company_profile_raises_after_exhausting_rate_limit_retries(
+    monkeypatch, tmp_path
+):
+    class AlwaysRateLimitedTicker(FakeTicker):
+        @property
+        def info(self):
+            raise stock_price_api.YFRateLimitError()
+
+    monkeypatch.setattr(stock_price_api.yf, "Ticker", AlwaysRateLimitedTicker)
+    sleep_calls = []
+    monkeypatch.setattr(stock_price_api.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine)
+
+    with pytest.raises(stock_price_api.YFRateLimitError):
+        stock_price_api.fetch_company_profile("7203.T", session_factory=session_factory)
+    # _RATE_LIMIT_RETRY_DELAYS_SEC の3回分（30/60/120秒）だけ待機してから諦める
+    assert sleep_calls == [30, 60, 120]
+
+
 def test_fetch_company_profile_logs_request_and_response(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(stock_price_api.yf, "Ticker", FakeTicker)
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")

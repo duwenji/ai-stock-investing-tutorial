@@ -5,10 +5,12 @@
 import datetime
 import logging
 import re
+import time
 
 import pandas as pd
 import requests
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration
@@ -20,6 +22,30 @@ logger = logging.getLogger(__name__)
 # Yahoo!ファイナンス（日本版）のページタイトルからHTMLをパースせず銘柄名を
 # 抜き出すための簡易正規表現（フルHTMLパーサーを使うほどではないため）
 _YAHOO_JP_TITLE_RE = re.compile(r"<title>([^<]*)</title>")
+
+# yfinance内部で既に数回リトライした末に送出されるYFRateLimitErrorに対する
+# 追加リトライの待機秒数（30秒→60秒→120秒）。Noneはこれ以上リトライせず
+# 例外を呼び出し元に伝播させることを表す。
+_RATE_LIMIT_RETRY_DELAYS_SEC: tuple[int | None, ...] = (30, 60, 120, None)
+
+
+def _call_with_rate_limit_retry(fn):
+    """yfinanceの1回の呼び出し（引数なしcallable）をYFRateLimitError発生時に
+    バックオフ付きでリトライする。update_market_dataのような大量銘柄の
+    一括取得バッチでYahoo側のレート制限に達しても、一時的な失敗として
+    復帰できるようにするための仕組み。"""
+    for attempt, delay in enumerate(_RATE_LIMIT_RETRY_DELAYS_SEC):
+        try:
+            return fn()
+        except YFRateLimitError:
+            if delay is None:
+                raise
+            logger.warning(
+                "yfinanceレート制限のため%d秒後にリトライします（%d回目）",
+                delay,
+                attempt + 1,
+            )
+            time.sleep(delay)
 
 
 # アプリ内で使われる最大期間（1mo/6mo/1y/2y/3y/5y）。鮮度切れ時は常にこの期間で
@@ -61,10 +87,12 @@ def _fetch_price_history_from_yfinance(
         logger.info(
             "株価履歴リクエスト（差分）: ticker=%s start_date=%s", ticker_symbol, start_date
         )
-        history = ticker.history(start=start_date.isoformat())
+        history = _call_with_rate_limit_retry(
+            lambda: ticker.history(start=start_date.isoformat())
+        )
     else:
         logger.info("株価履歴リクエスト: ticker=%s period=%s", ticker_symbol, period)
-        history = ticker.history(period=period)
+        history = _call_with_rate_limit_retry(lambda: ticker.history(period=period))
     logger.info(
         "株価履歴レスポンス: ticker=%s data=%s",
         ticker_symbol,
@@ -174,7 +202,7 @@ def _fetch_fundamentals_from_yfinance(ticker_symbol: str) -> dict:
     """yfinanceから直接ファンダメンタルズ指標を取得する（DBを経由しない生の取得処理）。"""
     logger.info("fundamentalsリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
-    info = ticker.info
+    info = _call_with_rate_limit_retry(lambda: ticker.info)
     result = {
         "ticker": ticker_symbol,
         "name": info.get("longName"),
@@ -251,7 +279,7 @@ def _fetch_company_profile_from_yfinance(ticker_symbol: str) -> dict:
     """yfinanceから直接業種・事業内容を取得する（DBを経由しない生の取得処理）。"""
     logger.info("company profileリクエスト: ticker=%s", ticker_symbol)
     ticker = yf.Ticker(ticker_symbol)
-    info = ticker.info
+    info = _call_with_rate_limit_retry(lambda: ticker.info)
     result = {
         "ticker": ticker_symbol,
         "sector": info.get("sector"),
@@ -294,7 +322,7 @@ def _fetch_news_from_yfinance(ticker_symbol: str, limit: int) -> list[dict]:
     （DBを経由しない生の取得処理）。"""
     logger.info("newsリクエスト: ticker=%s limit=%s", ticker_symbol, limit)
     ticker = yf.Ticker(ticker_symbol)
-    news_items = ticker.news or []
+    news_items = _call_with_rate_limit_retry(lambda: ticker.news) or []
     result = []
     for item in news_items[:limit]:
         # yfinanceのニュースレスポンスはネストしたcontent/provider構造のため、

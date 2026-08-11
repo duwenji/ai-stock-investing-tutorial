@@ -23,14 +23,28 @@ from db.engine import SessionLocal, engine, init_db
 
 logger = logging.getLogger(__name__)
 
+# 対話UI（ranking_tab等、数百銘柄規模）と異なり、本バッチは全銘柄（数千件）を
+# 対象に4フェーズ連続でyfinanceへアクセスするため、map_concurrentyのデフォルト
+# max_workers=8のままだとYahoo側のレート制限（YFRateLimitError）に達しやすい。
+# バッチ実行時はより低い同時実行数に絞る。
+_BATCH_MAX_WORKERS = 3
 
-def _run_phase(phase_name: str, tickers: list[str], fetch_fn, session_factory) -> dict:
+
+def _run_phase(
+    phase_name: str,
+    tickers: list[str],
+    fetch_fn,
+    session_factory,
+    max_workers: int = _BATCH_MAX_WORKERS,
+) -> dict:
     """1データ種別（price_history/fundamentals/news）について、対象ticker全件を
     並行取得する。1銘柄の失敗が他銘柄の処理を止めないよう、失敗はtickerと
     例外内容をログした上でサマリーに記録し、処理は継続する。"""
     with log_duration(logger, f"{phase_name}更新（{len(tickers)}銘柄）"):
         results = map_concurrently(
-            tickers, lambda ticker: fetch_fn(ticker, session_factory=session_factory)
+            tickers,
+            lambda ticker: fetch_fn(ticker, session_factory=session_factory),
+            max_workers=max_workers,
         )
         failed = []
         for ticker in tickers:

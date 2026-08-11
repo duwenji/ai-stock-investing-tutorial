@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+import scripts.update_market_data as update_market_data
 from db.engine import create_db_engine, init_db
 from db.models import CompanyProfile
 from scripts.update_market_data import main, run_update
@@ -111,6 +112,40 @@ def test_run_update_records_failures_without_stopping_other_tickers(
     assert summary["fundamentals"]["success"] == 2
     assert summary["news"]["success"] == 2
     assert summary["company_profile"]["success"] == 2
+
+
+def test_run_update_uses_low_concurrency_for_batch_phases(monkeypatch, session_factory):
+    """update_market_dataは数千銘柄×4フェーズをyfinanceへ連続アクセスするため、
+    対話UI向けのデフォルト（max_workers=8）よりレート制限を避けるべく低い
+    同時実行数で呼ぶ必要がある。"""
+    _seed_tickers(session_factory, ["AAAA.T", "BBBB.T"])
+    captured_max_workers = []
+
+    def fake_map_concurrently(items, fn, max_workers=8):
+        captured_max_workers.append(max_workers)
+        return {item: fn(item) for item in items}
+
+    monkeypatch.setattr(update_market_data, "map_concurrently", fake_map_concurrently)
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_price_history",
+        lambda ticker, session_factory=None: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_fundamentals",
+        lambda ticker, session_factory=None: {},
+    )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
+    )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_company_profile",
+        lambda ticker, session_factory=None: {},
+    )
+
+    run_update(session_factory=session_factory)
+
+    assert captured_max_workers == [update_market_data._BATCH_MAX_WORKERS] * 4
+    assert update_market_data._BATCH_MAX_WORKERS < 8
 
 
 def test_main_exits_zero_when_all_succeed(monkeypatch, session_factory):
