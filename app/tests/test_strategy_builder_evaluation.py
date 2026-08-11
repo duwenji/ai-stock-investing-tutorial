@@ -105,6 +105,60 @@ def test_run_evaluation_loop_stops_at_max_iterations_when_never_passes():
     assert result["last_feedback"] == "まだ不十分です"
 
 
+def test_run_evaluation_loop_refines_steps_based_strategy_and_returns_on_second_pass():
+    strategy = {
+        "strategy_name": "ゴールデンクロス",
+        "steps": [{"function": "BACKTEST_RANK", "params": {"strategy": "移動平均クロスオーバー"}}],
+    }
+    refined_strategy = {
+        "strategy_name": "ゴールデンクロス（改善）",
+        "steps": [
+            {"function": "BACKTEST_RANK", "params": {"strategy": "移動平均クロスオーバー", "top_n": 50}}
+        ],
+    }
+    responses = iter(
+        [
+            '{"pass": false, "feedback": "対象銘柄数を絞ってください"}',
+            json.dumps(refined_strategy, ensure_ascii=False),
+            '{"pass": true, "feedback": ""}',
+        ]
+    )
+
+    def fake_call_llm(prompt):
+        return next(responses)
+
+    result = run_evaluation_loop(strategy, call_llm=fake_call_llm)
+
+    assert result["strategy"] == refined_strategy
+    assert result["iterations"] == 1
+
+
+def test_run_evaluation_loop_rejects_refinement_with_wrong_schema_for_steps_strategy():
+    strategy = {
+        "strategy_name": "ゴールデンクロス",
+        "steps": [{"function": "BACKTEST_RANK", "params": {"strategy": "移動平均クロスオーバー"}}],
+    }
+    # 改善案の応答がconditions形式（旧スキーマ）で返ってきた不正なケース
+    wrong_schema_refinement = {
+        "strategy_name": "誤ったスキーマ",
+        "conditions": [{"indicator": "PER", "operator": "LESS_THAN", "value": 15}],
+    }
+    responses = iter(
+        [
+            '{"pass": false, "feedback": "改善してください"}',
+            json.dumps(wrong_schema_refinement, ensure_ascii=False),
+            '{"pass": false, "feedback": "まだ不十分です"}',
+        ]
+    )
+
+    def fake_call_llm(prompt):
+        return next(responses)
+
+    result = run_evaluation_loop(strategy, call_llm=fake_call_llm, max_iterations=2)
+
+    assert result["strategy"] == strategy
+
+
 def test_run_evaluation_loop_skips_refinement_when_response_is_invalid_json():
     strategy = {
         "strategy_name": "割安株",

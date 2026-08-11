@@ -61,7 +61,8 @@ def run_evaluation_loop(
                 refined = json.loads(strip_code_fence(raw))
             except json.JSONDecodeError:
                 refined = None
-            if isinstance(refined, dict) and "conditions" in refined:
+            expected_key = "steps" if "steps" in current else "conditions"
+            if isinstance(refined, dict) and expected_key in refined:
                 current = refined
 
     return {"strategy": current, "iterations": max_iterations, "last_feedback": last_feedback}
