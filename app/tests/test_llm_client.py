@@ -2,10 +2,14 @@ import logging
 import subprocess
 
 import pytest
+import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from data_api.llm_client import (
     ClaudeCLIError,
     ClaudeCLINotFoundError,
+    _get_provider,
+    _get_secret,
     call_llm,
     check_claude_cli_available,
 )
@@ -111,3 +115,32 @@ def test_call_llm_does_not_log_response_on_failure(monkeypatch, caplog):
 
     assert "Claude CLIリクエスト: prompt" in caplog.text
     assert "Claude CLIレスポンス" not in caplog.text
+
+
+def test_get_secret_returns_value_when_present(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"llm_provider": "openai"})
+    assert _get_secret("llm_provider") == "openai"
+
+
+def test_get_secret_returns_default_when_key_missing(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
+    assert _get_secret("llm_provider", "claude_cli") == "claude_cli"
+
+
+def test_get_secret_returns_default_when_secrets_file_missing(monkeypatch):
+    class RaisingSecrets:
+        def get(self, key, default=None):
+            raise StreamlitSecretNotFoundError("no secrets file")
+
+    monkeypatch.setattr(st, "secrets", RaisingSecrets())
+    assert _get_secret("llm_provider", "claude_cli") == "claude_cli"
+
+
+def test_get_provider_defaults_to_claude_cli(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
+    assert _get_provider() == "claude_cli"
+
+
+def test_get_provider_normalizes_case_and_whitespace(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"llm_provider": "  OpenAI  "})
+    assert _get_provider() == "openai"

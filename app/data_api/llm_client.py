@@ -5,6 +5,9 @@ import logging
 import shutil
 import subprocess
 
+import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
+
 from common.logging_config import log_duration
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,22 @@ class ClaudeCLIError(RuntimeError):
 # LLMに毎回渡すシステムプロンプト。出力形式をアプリ側で制御しやすくするため、
 # 指示外の余計な発言をしないよう厳密に指示している。
 _SYSTEM_PROMPT = "あなたは指示に厳密に従うアシスタントです。指示された出力のみを返してください。"
+
+
+def _get_secret(key: str, default: str | None = None) -> str | None:
+    """`.streamlit/secrets.toml` から設定値を読む。secretsファイル自体が
+    存在しない環境（フレッシュcloneでのpytest実行等）でも落ちないよう、
+    その場合はdefaultにフォールバックする。"""
+    try:
+        return st.secrets.get(key, default)
+    except StreamlitSecretNotFoundError:
+        return default
+
+
+def _get_provider() -> str:
+    """LLM呼び出し先プロバイダを返す（`"claude_cli"` または `"openai"` を想定した
+    生文字列。バリデーションは呼び出し側で行う）。"""
+    return (_get_secret("llm_provider", "claude_cli") or "claude_cli").strip().lower()
 
 
 def _resolve_claude_executable() -> str:
