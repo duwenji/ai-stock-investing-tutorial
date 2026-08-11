@@ -253,3 +253,120 @@ def _run_filter_current_signal(candidates_df: pd.DataFrame, params: dict, cache_
         keep_mask.append(_detect_signal_for_row(close, strategy, row.get("best_params"), signal))
 
     return candidates_df[keep_mask]
+
+
+def _run_filter_by_fundamentals(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataFrame:
+    """PER/PBR/ROE等のファンダメンタルズ条件で絞り込む。候補銘柄にまだ
+    ファンダメンタルズ/業種列が無い前提で、フィルタ前に取得・結合する。"""
+    if candidates_df.empty:
+        return candidates_df
+    tickers = candidates_df["ticker"].tolist()
+    fundamentals_df = fetch_universe_fundamentals(tickers)
+    profiles = load_all_company_profiles()
+    sector_jp_by_ticker = {p["ticker"]: p["sector_jp"] for p in profiles if p["sector_jp"]}
+    fundamentals_df = fundamentals_df.assign(
+        sector=fundamentals_df["ticker"].map(sector_jp_by_ticker)
+    )
+    merged_df = candidates_df.merge(fundamentals_df.drop(columns=["name"]), on="ticker", how="left")
+    return apply_strategy_conditions(merged_df, {"conditions": params.get("conditions", [])})
+
+
+def _run_sort_by(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataFrame:
+    """その時点で存在する列で並べ替える。存在しない列の場合は元の順序のまま返す。"""
+    field = params.get("field")
+    if field not in candidates_df.columns:
+        return candidates_df
+    ascending = params.get("order") != "DESC"
+    return candidates_df.sort_values(field, ascending=ascending)
+
+
+def _run_top_n(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataFrame:
+    """指定件数に絞る。byが指定されていればその列で降順ソートしてから先頭n件を、
+    省略時は直前の並び順のまま先頭n件を取る。"""
+    n = params.get("n")
+    if n is None:
+        return candidates_df
+    by = params.get("by")
+    if by is not None and by in candidates_df.columns:
+        candidates_df = candidates_df.sort_values(by, ascending=False)
+    return candidates_df.head(n)
+
+
+PIPELINE_FUNCTIONS: dict[str, dict] = {
+    "BACKTEST_RANK": {
+        "description": (
+            "対象銘柄群をSTRATEGIES（移動平均クロスオーバー/RSI逆張り/MACDクロスオーバー/"
+            "ボリンジャーバンド逆張り）のいずれかでバックテストし、銘柄ごとに近傍グリッド"
+            "サーチで最適パラメータを探索してリスク調整済みリターン（収益率÷|最大ドロー"
+            "ダウン|）降順にランキングし、上位top_n件に絞る。出力列: total_return_pct, "
+            "benchmark_return_pct, win_rate_pct, max_drawdown_pct, risk_adjusted_return, "
+            "best_params, _source_strategy。"
+        ),
+        "params_schema": {
+            "strategy": "STRATEGIESのキー文字列（例: 移動平均クロスオーバー）",
+            "period": "1y/3y/5y",
+            "transaction_cost_pct": "数値（省略時0）",
+            "top_n": "整数（省略時は絞り込みなし）",
+        },
+        "run": _run_backtest_rank,
+    },
+    "MULTI_STRATEGY_RANK": {
+        "description": (
+            "1戦略に決め打たず、STRATEGIESの4戦略すべてで対象銘柄群をバックテストし、"
+            "銘柄ごとに「4戦略中もっともリスク調整済みリターンが高かった戦略」を採用して"
+            "総合的にランキングする。「総合的に評価」「複数戦略で判断」のような要望で使う。"
+            "出力列はBACKTEST_RANKと同じに加え、avg_risk_adjusted_return（4戦略平均）と"
+            "profitable_strategy_count（4戦略中プラス収益だった戦略数、0〜4）を追加する。"
+        ),
+        "params_schema": {
+            "period": "1y/3y/5y",
+            "transaction_cost_pct": "数値（省略時0）",
+            "top_n": "整数（省略時は絞り込みなし）",
+            "aggregation": (
+                "MEAN（デフォルト、avg_risk_adjusted_return降順）/ "
+                "CONSENSUS（profitable_strategy_count降順）/ "
+                "BEST（採用戦略自身のrisk_adjusted_return降順）"
+            ),
+        },
+        "run": _run_multi_strategy_rank,
+    },
+    "FILTER_CURRENT_SIGNAL": {
+        "description": (
+            "各銘柄について、その銘柄自身の_source_strategy列の値（直前のBACKTEST_RANK"
+            "またはMULTI_STRATEGY_RANKが付与）が直近5営業日以内にENTRY/EXITシグナルを"
+            "出したかで絞り込む。移動平均クロスオーバー: ENTRY＝ゴールデンクロス、EXIT＝"
+            "デッドクロス。MACDクロスオーバー: ENTRY＝MACD線がシグナル線を上抜け、EXIT＝"
+            "その逆。RSI逆張り: ENTRY＝売られすぎ水準から回復、EXIT＝買われすぎ水準に到達。"
+            "ボリンジャーバンド逆張り: ENTRY＝下バンド割れ、EXIT＝中心線を上抜け。"
+        ),
+        "params_schema": {
+            "signal": "ENTRY または EXIT",
+            "strategy": "省略可。STRATEGIESのキー文字列。省略時は銘柄ごとの_source_strategy列を使う",
+        },
+        "run": _run_filter_current_signal,
+    },
+    "FILTER_BY_FUNDAMENTALS": {
+        "description": (
+            "PER/PBR/ROE/配当利回り/売上高伸び率/時価総額/業種でフィルタする。"
+        ),
+        "params_schema": {
+            "conditions": (
+                "[{indicator, operator, value}, ...] の配列。indicatorはPER, PBR, ROE, "
+                "DIVIDEND_YIELD, REVENUE_GROWTH, MARKET_CAP, SECTORのいずれか。operatorは"
+                "LESS_THAN, LESS_EQUAL, GREATER_THAN, GREATER_EQUAL, EQUALSのいずれか"
+                "（SECTORはEQUALSのみ）。"
+            ),
+        },
+        "run": _run_filter_by_fundamentals,
+    },
+    "SORT_BY": {
+        "description": "その時点で存在する列で並べ替える。存在しない列の場合は並べ替えをスキップする。",
+        "params_schema": {"field": "列名", "order": "ASC または DESC"},
+        "run": _run_sort_by,
+    },
+    "TOP_N": {
+        "description": "指定件数に絞る。byが指定されていればその列で降順ソートしてから先頭n件を取る。",
+        "params_schema": {"n": "整数", "by": "列名（省略可）"},
+        "run": _run_top_n,
+    },
+}

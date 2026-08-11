@@ -395,3 +395,84 @@ def test_run_filter_current_signal_skips_row_when_strategy_unresolvable(monkeypa
     )
 
     assert result_df.empty
+
+
+def test_run_filter_by_fundamentals_merges_and_filters(monkeypatch, tmp_path):
+    def fake_fetch_universe_fundamentals(tickers):
+        return pd.DataFrame(
+            [
+                {"ticker": "AAA.T", "name": "A社", "per": 10.0, "pbr": 1.0,
+                 "dividend_yield_pct": 4.0, "market_cap": 100, "roe_pct": 12.0,
+                 "revenue_growth_pct": 5.0},
+                {"ticker": "BBB.T", "name": "B社", "per": 25.0, "pbr": 3.0,
+                 "dividend_yield_pct": 1.0, "market_cap": 200, "roe_pct": 8.0,
+                 "revenue_growth_pct": 2.0},
+            ]
+        )
+
+    monkeypatch.setattr(
+        pipeline_functions, "fetch_universe_fundamentals", fake_fetch_universe_fundamentals
+    )
+    monkeypatch.setattr(pipeline_functions, "load_all_company_profiles", lambda: [])
+
+    candidates_df = pd.DataFrame(
+        [{"ticker": "AAA.T", "risk_adjusted_return": 3.0},
+         {"ticker": "BBB.T", "risk_adjusted_return": 5.0}]
+    )
+
+    result_df = pipeline_functions._run_filter_by_fundamentals(
+        candidates_df,
+        {"conditions": [{"indicator": "DIVIDEND_YIELD", "operator": "GREATER_EQUAL", "value": 3}]},
+        tmp_path,
+    )
+
+    assert result_df["ticker"].tolist() == ["AAA.T"]
+    assert result_df["risk_adjusted_return"].tolist() == [3.0]
+
+
+def test_run_filter_by_fundamentals_returns_empty_unchanged():
+    result_df = pipeline_functions._run_filter_by_fundamentals(
+        pd.DataFrame(columns=["ticker"]), {"conditions": []}, None
+    )
+    assert result_df.empty
+
+
+def test_run_sort_by_sorts_descending_by_field():
+    df = pd.DataFrame([{"ticker": "AAA.T", "risk_adjusted_return": 1.0},
+                        {"ticker": "BBB.T", "risk_adjusted_return": 5.0}])
+    result_df = pipeline_functions._run_sort_by(
+        df, {"field": "risk_adjusted_return", "order": "DESC"}, None
+    )
+    assert result_df["ticker"].tolist() == ["BBB.T", "AAA.T"]
+
+
+def test_run_sort_by_returns_unchanged_when_field_missing():
+    df = pd.DataFrame([{"ticker": "AAA.T"}])
+    result_df = pipeline_functions._run_sort_by(df, {"field": "unknown_field", "order": "DESC"}, None)
+    assert result_df["ticker"].tolist() == ["AAA.T"]
+
+
+def test_run_top_n_truncates_to_n_rows():
+    df = pd.DataFrame([{"ticker": f"T{i}.T"} for i in range(5)])
+    result_df = pipeline_functions._run_top_n(df, {"n": 2}, None)
+    assert len(result_df) == 2
+
+
+def test_run_top_n_sorts_by_field_before_truncating():
+    df = pd.DataFrame([{"ticker": "AAA.T", "score": 1.0}, {"ticker": "BBB.T", "score": 9.0}])
+    result_df = pipeline_functions._run_top_n(df, {"n": 1, "by": "score"}, None)
+    assert result_df["ticker"].tolist() == ["BBB.T"]
+
+
+def test_pipeline_functions_registry_contains_all_six_functions():
+    assert set(pipeline_functions.PIPELINE_FUNCTIONS.keys()) == {
+        "BACKTEST_RANK", "MULTI_STRATEGY_RANK", "FILTER_CURRENT_SIGNAL",
+        "FILTER_BY_FUNDAMENTALS", "SORT_BY", "TOP_N",
+    }
+
+
+def test_pipeline_functions_registry_entries_have_description_params_schema_and_run():
+    for entry in pipeline_functions.PIPELINE_FUNCTIONS.values():
+        assert isinstance(entry["description"], str) and entry["description"]
+        assert isinstance(entry["params_schema"], dict)
+        assert callable(entry["run"])
