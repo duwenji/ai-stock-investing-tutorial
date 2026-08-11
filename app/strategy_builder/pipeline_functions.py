@@ -148,12 +148,11 @@ def _run_multi_strategy_rank(candidates_df: pd.DataFrame, params: dict, cache_di
 def _detect_recent_cross(
     fast: pd.Series, slow: pd.Series, direction: str = "up", within_days: int = 5,
 ) -> bool:
-    """2系列が直近within_days営業日以内に交差したかを判定する。
-    データ不足（NaN混在含む）時はクロス無し（False）として扱う。"""
+    """2系列が直近within_days営業日以内に交差したかを判定する。系列長が
+    within_days+1に満たない場合はFalseを返す。ローリング窓の未成熟期間
+    （fast/slowの先頭側のNaN）はfast > slow等の比較が自然にFalseになるため
+    誤ったクロス検出にはならず、別途NaNチェックは不要。"""
     if len(fast) < within_days + 1:
-        return False
-    recent_fast, recent_slow = fast.iloc[-(within_days + 1):], slow.iloc[-(within_days + 1):]
-    if recent_fast.isna().any() or recent_slow.isna().any():
         return False
     is_above = fast > slow
     # shift(1)はbool Seriesの先頭にNaNを挿入するためdtypeがobjectに昇格し、
@@ -175,3 +174,82 @@ def _detect_recent_threshold_cross(
     prev_above = is_above.shift(1).fillna(False).astype(bool)
     crossed = is_above & ~prev_above
     return bool(crossed.iloc[-within_days:].any())
+
+
+_SIGNAL_DIRECTION = {"ENTRY": "up", "EXIT": "down"}
+
+_STRATEGY_PARAM_DEFAULTS: dict[str, dict] = {
+    "移動平均クロスオーバー": {"short_window": 25, "long_window": 75},
+    "RSI逆張り": {"period": 14, "oversold": 30, "overbought": 70},
+    "MACDクロスオーバー": {"fast": 12, "slow": 26, "signal": 9},
+    "ボリンジャーバンド逆張り": {"window": 20, "num_std": 2.0},
+}
+
+
+def _resolve_strategy_params(strategy: str, best_params: dict | None) -> dict:
+    """best_paramsがNone、または対象strategyの既定パラメータのキーと一致しない
+    （別戦略のbest_paramsが紛れ込んだ等）場合は、STRATEGIESの既定パラメータに
+    フォールバックする。"""
+    defaults = _STRATEGY_PARAM_DEFAULTS[strategy]
+    if not best_params or not set(defaults).issubset(best_params.keys()):
+        return defaults
+    return {key: best_params[key] for key in defaults}
+
+
+def _detect_signal_for_row(
+    close: pd.Series, strategy: str, best_params: dict | None, signal: str
+) -> bool:
+    """1銘柄の価格系列について、strategyとsignal（ENTRY/EXIT）に応じた
+    直近5営業日以内のシグナル発生を判定する。未知のstrategyはFalseを返す。"""
+    if strategy not in _STRATEGY_PARAM_DEFAULTS:
+        return False
+    direction = _SIGNAL_DIRECTION[signal]
+    params = _resolve_strategy_params(strategy, best_params)
+
+    if strategy == "移動平均クロスオーバー":
+        short_ma, long_ma = compute_ma_crossover_series(
+            close, params["short_window"], params["long_window"]
+        )
+        return _detect_recent_cross(short_ma, long_ma, direction)
+    if strategy == "MACDクロスオーバー":
+        macd_line, signal_line = compute_macd_series(
+            close, params["fast"], params["slow"], params["signal"]
+        )
+        return _detect_recent_cross(macd_line, signal_line, direction)
+    if strategy == "ボリンジャーバンド逆張り":
+        middle_band, lower_band = compute_bollinger_bands(
+            close, params["window"], params["num_std"]
+        )
+        if signal == "ENTRY":
+            return _detect_recent_cross(close, lower_band, "down")
+        return _detect_recent_cross(close, middle_band, "up")
+    # RSI逆張り
+    rsi = compute_rsi_series(close, params["period"])
+    threshold = params["oversold"] if signal == "ENTRY" else params["overbought"]
+    return _detect_recent_threshold_cross(rsi, threshold, "up")
+
+
+def _run_filter_current_signal(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataFrame:
+    """各銘柄について、その銘柄自身のstrategy（override指定が無ければ
+    _source_strategy列）が直近5営業日以内にENTRY/EXITシグナルを出したかで絞り込む。"""
+    signal = params.get("signal")
+    if signal not in _SIGNAL_DIRECTION:
+        raise ValueError(f"未知のsignalです: {signal}")
+    override_strategy = params.get("strategy")
+
+    if candidates_df.empty:
+        return candidates_df
+
+    tickers = candidates_df["ticker"].tolist()
+    prices_by_ticker = fetch_universe_price_histories(tickers, period="1y")
+
+    keep_mask = []
+    for _, row in candidates_df.iterrows():
+        strategy = override_strategy or row.get("_source_strategy")
+        close = prices_by_ticker.get(row["ticker"])
+        if strategy is None or close is None or close.empty:
+            keep_mask.append(False)
+            continue
+        keep_mask.append(_detect_signal_for_row(close, strategy, row.get("best_params"), signal))
+
+    return candidates_df[keep_mask]

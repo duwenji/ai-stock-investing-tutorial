@@ -229,3 +229,169 @@ def test_detect_recent_threshold_cross_false_when_never_crossed():
     assert pipeline_functions._detect_recent_threshold_cross(
         series, threshold=30.0, direction="up", within_days=3
     ) is False
+
+
+def test_resolve_strategy_params_uses_best_params_when_keys_match():
+    params = pipeline_functions._resolve_strategy_params(
+        "移動平均クロスオーバー", {"short_window": 10, "long_window": 40}
+    )
+    assert params == {"short_window": 10, "long_window": 40}
+
+
+def test_resolve_strategy_params_falls_back_to_defaults_when_keys_mismatch():
+    params = pipeline_functions._resolve_strategy_params("移動平均クロスオーバー", {"period": 14})
+    assert params == {"short_window": 25, "long_window": 75}
+
+
+def test_resolve_strategy_params_falls_back_to_defaults_when_none():
+    params = pipeline_functions._resolve_strategy_params("RSI逆張り", None)
+    assert params == {"period": 14, "oversold": 30, "overbought": 70}
+
+
+def test_detect_signal_for_row_dispatches_ma_crossover():
+    dates = pd.date_range("2026-01-01", periods=10, freq="D")
+    close = pd.Series([10, 10, 10, 10, 10, 20, 20, 20, 20, 20], index=dates, dtype=float)
+
+    result = pipeline_functions._detect_signal_for_row(
+        close, "移動平均クロスオーバー", {"short_window": 1, "long_window": 3}, "ENTRY"
+    )
+    assert result is True
+
+
+def test_detect_signal_for_row_dispatches_rsi_entry_uses_oversold(monkeypatch):
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    close = pd.Series(range(4), index=dates, dtype=float)
+    captured = {}
+
+    def fake_compute_rsi(prices, period):
+        captured["period"] = period
+        return pd.Series([20.0, 20.0, 35.0, 35.0], index=dates)
+
+    monkeypatch.setattr(pipeline_functions, "compute_rsi_series", fake_compute_rsi)
+
+    entry_result = pipeline_functions._detect_signal_for_row(
+        close, "RSI逆張り", {"period": 7, "oversold": 30, "overbought": 70}, "ENTRY"
+    )
+    exit_result = pipeline_functions._detect_signal_for_row(
+        close, "RSI逆張り", {"period": 7, "oversold": 30, "overbought": 70}, "EXIT"
+    )
+
+    assert captured["period"] == 7
+    assert entry_result is True
+    assert exit_result is False
+
+
+def test_detect_signal_for_row_dispatches_macd_crossover(monkeypatch):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    close = pd.Series(range(6), index=dates, dtype=float)
+
+    def fake_compute_macd(prices, fast, slow, signal):
+        macd_line = pd.Series([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0], index=dates)
+        signal_line = pd.Series([0.0] * 6, index=dates)
+        return macd_line, signal_line
+
+    monkeypatch.setattr(pipeline_functions, "compute_macd_series", fake_compute_macd)
+
+    result = pipeline_functions._detect_signal_for_row(
+        close, "MACDクロスオーバー", {"fast": 12, "slow": 26, "signal": 9}, "ENTRY"
+    )
+    assert result is True
+
+
+def test_detect_signal_for_row_dispatches_bollinger_entry_uses_lower_band(monkeypatch):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    close = pd.Series([100.0, 100.0, 100.0, 70.0, 70.0, 70.0], index=dates)
+
+    def fake_compute_bands(prices, window, num_std):
+        return pd.Series([100.0] * 6, index=dates), pd.Series([90.0] * 6, index=dates)
+
+    monkeypatch.setattr(pipeline_functions, "compute_bollinger_bands", fake_compute_bands)
+
+    entry_result = pipeline_functions._detect_signal_for_row(
+        close, "ボリンジャーバンド逆張り", {"window": 20, "num_std": 2.0}, "ENTRY"
+    )
+    assert entry_result is True
+
+
+def test_detect_signal_for_row_dispatches_bollinger_exit_uses_middle_band(monkeypatch):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    close = pd.Series([70.0, 70.0, 70.0, 100.0, 100.0, 100.0], index=dates)
+
+    def fake_compute_bands(prices, window, num_std):
+        return pd.Series([90.0] * 6, index=dates), pd.Series([60.0] * 6, index=dates)
+
+    monkeypatch.setattr(pipeline_functions, "compute_bollinger_bands", fake_compute_bands)
+
+    exit_result = pipeline_functions._detect_signal_for_row(
+        close, "ボリンジャーバンド逆張り", {"window": 20, "num_std": 2.0}, "EXIT"
+    )
+    assert exit_result is True
+
+
+def test_detect_signal_for_row_returns_false_for_unknown_strategy():
+    dates = pd.date_range("2026-01-01", periods=3, freq="D")
+    close = pd.Series([1.0, 2.0, 3.0], index=dates)
+
+    assert pipeline_functions._detect_signal_for_row(close, "未知戦略", None, "ENTRY") is False
+
+
+def test_run_filter_current_signal_keeps_only_rows_with_entry_signal(monkeypatch, tmp_path):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+
+    def fake_fetch(tickers, period):
+        return {
+            "AAA.T": pd.Series([10, 10, 10, 10, 10, 10], index=dates, dtype=float),
+            "BBB.T": pd.Series([10, 10, 10, 20, 20, 20], index=dates, dtype=float),
+        }
+
+    monkeypatch.setattr(pipeline_functions, "fetch_universe_price_histories", fake_fetch)
+
+    candidates_df = pd.DataFrame(
+        [
+            {"ticker": "AAA.T", "_source_strategy": "移動平均クロスオーバー",
+             "best_params": {"short_window": 1, "long_window": 3}},
+            {"ticker": "BBB.T", "_source_strategy": "移動平均クロスオーバー",
+             "best_params": {"short_window": 1, "long_window": 3}},
+        ]
+    )
+
+    result_df = pipeline_functions._run_filter_current_signal(
+        candidates_df, {"signal": "ENTRY"}, tmp_path
+    )
+
+    assert result_df["ticker"].tolist() == ["BBB.T"]
+
+
+def test_run_filter_current_signal_uses_explicit_strategy_override(monkeypatch, tmp_path):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+
+    def fake_fetch(tickers, period):
+        return {"AAA.T": pd.Series([10, 10, 10, 20, 20, 20], index=dates, dtype=float)}
+
+    monkeypatch.setattr(pipeline_functions, "fetch_universe_price_histories", fake_fetch)
+
+    candidates_df = pd.DataFrame(
+        [{"ticker": "AAA.T", "best_params": {"short_window": 1, "long_window": 3}}]
+    )
+
+    result_df = pipeline_functions._run_filter_current_signal(
+        candidates_df, {"signal": "ENTRY", "strategy": "移動平均クロスオーバー"}, tmp_path
+    )
+
+    assert result_df["ticker"].tolist() == ["AAA.T"]
+
+
+def test_run_filter_current_signal_skips_row_when_strategy_unresolvable(monkeypatch, tmp_path):
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+
+    def fake_fetch(tickers, period):
+        return {"AAA.T": pd.Series([10, 10, 10, 20, 20, 20], index=dates, dtype=float)}
+
+    monkeypatch.setattr(pipeline_functions, "fetch_universe_price_histories", fake_fetch)
+
+    candidates_df = pd.DataFrame([{"ticker": "AAA.T"}])
+    result_df = pipeline_functions._run_filter_current_signal(
+        candidates_df, {"signal": "ENTRY"}, tmp_path
+    )
+
+    assert result_df.empty
