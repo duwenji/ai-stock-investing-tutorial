@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 
@@ -6,6 +7,7 @@ import pandas as pd
 from common.disclaimer import DISCLAIMER_NOTICE
 from portfolio_management.backtest import (
     STRATEGIES,
+    build_universe_backtest_cache_key,
     compute_bollinger_bands,
     compute_ma_crossover_series,
     compute_macd_series,
@@ -719,3 +721,30 @@ def test_compute_bollinger_bands_matches_manual_formula():
     expected_lower = expected_middle - 1.0 * prices.rolling(3).std()
     pd.testing.assert_series_equal(middle_band, expected_middle)
     pd.testing.assert_series_equal(lower_band, expected_lower)
+
+
+def test_build_universe_backtest_cache_key_matches_legacy_single_strategy_format():
+    # ranking_tab.pyの旧実装と同じハッシュ値になることを確認し、
+    # 既存キャッシュを無効化しないことを保証する。
+    key = build_universe_backtest_cache_key(
+        ["移動平均クロスオーバー"], "3y", 0.1, ["AAA.T", "BBB.T"]
+    )
+    legacy_source = "移動平均クロスオーバー-3y-0.1-AAA.T-BBB.T"
+    expected = "universe-backtest-" + hashlib.sha256(legacy_source.encode("utf-8")).hexdigest()[:12]
+    assert key == expected
+
+
+def test_build_universe_backtest_cache_key_is_order_independent_for_tickers():
+    key_a = build_universe_backtest_cache_key(["RSI逆張り"], "1y", 0.0, ["BBB.T", "AAA.T"])
+    key_b = build_universe_backtest_cache_key(["RSI逆張り"], "1y", 0.0, ["AAA.T", "BBB.T"])
+    assert key_a == key_b
+
+
+def test_build_universe_backtest_cache_key_differs_by_aggregation():
+    key_mean = build_universe_backtest_cache_key(
+        ["A", "B"], "1y", 0.0, ["AAA.T"], aggregation="MEAN"
+    )
+    key_best = build_universe_backtest_cache_key(
+        ["A", "B"], "1y", 0.0, ["AAA.T"], aggregation="BEST"
+    )
+    assert key_mean != key_best

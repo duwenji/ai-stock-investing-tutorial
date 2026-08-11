@@ -2,6 +2,7 @@
 過去の株価系列でベクトル化バックテストを実行し、成績指標やLLMによる
 解説文を生成するモジュール。"""
 
+import hashlib
 import logging
 import statistics
 from concurrent.futures import ThreadPoolExecutor
@@ -425,3 +426,22 @@ def run_universe_backtest_ranking(
                 if row is not None:
                     rows.append(row)
         return sorted(rows, key=lambda row: row["risk_adjusted_return"], reverse=True)
+
+
+def build_universe_backtest_cache_key(
+    strategy_names: list[str],
+    period: str,
+    transaction_cost_pct: float,
+    tickers: list[str],
+    aggregation: str | None = None,
+) -> str:
+    """ユニバース一括バックテスト結果のキャッシュキーを生成する。strategy_names・
+    period・transaction_cost_pct・対象ticker集合（順不同を吸収するためソートして
+    結合）からハッシュ化する。単一戦略の場合はstrategy_namesを要素数1のリストで
+    渡す。ranking_tab.py（単一戦略）とpipeline_functions.py（単一/4戦略）の
+    両方から共有される。"""
+    strategy_part = "+".join(strategy_names)
+    key_source = f"{strategy_part}-{period}-{transaction_cost_pct}-{'-'.join(sorted(tickers))}"
+    if aggregation is not None:
+        key_source += f"-{aggregation}"
+    return "universe-backtest-" + hashlib.sha256(key_source.encode("utf-8")).hexdigest()[:12]
