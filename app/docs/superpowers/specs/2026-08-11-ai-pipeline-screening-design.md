@@ -75,7 +75,17 @@ v1のレジストリ（BACKTEST_RANK＋FILTER_BY_FUNDAMENTALS）の組み合わ�
 「どれか1戦略に決めず総合的に評価してほしい」という要望であれば、AIは代わりに
 `MULTI_STRATEGY_RANK(top_n=100) → FILTER_CURRENT_SIGNAL(signal=ENTRY) → SORT_BY(...)`
 を生成する。`MULTI_STRATEGY_RANK`の出力列は`BACKTEST_RANK`と互換のため、後続の
-`FILTER_CURRENT_SIGNAL`/`SORT_BY`はどちらが前段にあっても同じstepsのまま動く。
+`FILTER_CURRENT_SIGNAL`/`SORT_BY`はコード変更なく同じstepsの書き方のまま繋げられる
+（＝AIが呼び分けを意識する必要がない）。ただし2つの関数の「互換」の意味は異なる。
+
+- `FILTER_CURRENT_SIGNAL`は**銘柄ごとに`_source_strategy`を見て分岐する**（詳細は
+  「新規モジュール」節）。BACKTEST_RANK由来なら全銘柄が同じロジックで、
+  MULTI_STRATEGY_RANK由来なら銘柄Aは移動平均クロス判定、銘柄BはRSI判定、というように
+  銘柄ごとに異なるロジックが使われる。
+- `SORT_BY`は**戦略に一切依存しない**。指定列（例: `risk_adjusted_return`）の値を
+  そのまま比較するだけで、`risk_adjusted_return`自体が「収益率÷|最大ドローダウン|」
+  という戦略非依存の共通定義で計算されているため、異なる戦略由来の銘柄が混在していても
+  数値として意味のある比較になる。
 
 ## 新規モジュール
 
@@ -259,12 +269,12 @@ def _detect_recent_threshold_cross(
    （`_detect_recent_cross`または`_detect_recent_threshold_cross`）を呼ぶ
 4. Trueの行だけを残す
 
-| strategy | signal=ENTRY | signal=EXIT |
-|---|---|---|
-| 移動平均クロスオーバー | `_detect_recent_cross(short_ma, long_ma, "up")` | 同, `"down"` |
-| MACDクロスオーバー | `_detect_recent_cross(macd_line, signal_line, "up")` | 同, `"down"` |
-| ボリンジャーバンド逆張り | `_detect_recent_cross(close, lower_band, "down")` | `_detect_recent_cross(close, middle_band, "up")` |
-| RSI逆張り | `_detect_recent_threshold_cross(rsi, oversold, "up")` | `_detect_recent_threshold_cross(rsi, overbought, "up")` |
+| strategy                 | signal=ENTRY                                            | signal=EXIT                                               |
+| ------------------------ | ------------------------------------------------------- | --------------------------------------------------------- |
+| 移動平均クロスオーバー   | `_detect_recent_cross(short_ma, long_ma, "up")`       | 同,`"down"`                                             |
+| MACDクロスオーバー       | `_detect_recent_cross(macd_line, signal_line, "up")`  | 同,`"down"`                                             |
+| ボリンジャーバンド逆張り | `_detect_recent_cross(close, lower_band, "down")`     | `_detect_recent_cross(close, middle_band, "up")`        |
+| RSI逆張り                | `_detect_recent_threshold_cross(rsi, oversold, "up")` | `_detect_recent_threshold_cross(rsi, overbought, "up")` |
 
 上表は`strategy`が行ごとに何であっても同じディスパッチ表を使う、という意味であり、
 `MULTI_STRATEGY_RANK`の出力（銘柄Aは移動平均クロスオーバー、銘柄BはRSI逆張り、等）を
