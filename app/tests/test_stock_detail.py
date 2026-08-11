@@ -23,6 +23,10 @@ def _fake_history():
 
 def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
     def fake_call_llm(prompt):
+        if "タイトルを日本語に翻訳してください" in prompt:
+            return "ニュース1"
+        if "ニュース要約" in prompt:
+            return "要約日本語"
         if "市場での立ち位置" in prompt:
             return "テスト用のプロフィール要約です。"
         return "テスト用の総合コメントです。"
@@ -59,7 +63,14 @@ def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
         },
         "fundamentals": {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
         "technical": {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
-        "news": [{"title": "ニュース1", "publisher": "社", "link": "http://example.com"}],
+        "news": [
+            {
+                "title": "ニュース1",
+                "publisher": "社",
+                "link": "http://example.com",
+                "title_ja": "ニュース1",
+            }
+        ],
         "comment": "テスト用の総合コメントです。",
         "profile": {
             "sector": "Consumer Cyclical",
@@ -290,9 +301,55 @@ def test_generate_stock_detail_translates_news_summaries_and_merges_summary_ja(t
     assert result["news"][1]["summary_ja"] == "翻訳文2"
 
 
-def test_generate_stock_detail_skips_translation_call_when_no_news_have_summary(tmp_path):
+def test_generate_stock_detail_translates_news_titles_and_summaries(tmp_path):
     def fake_call_llm(prompt):
-        assert "日本語に翻訳してください" not in prompt
+        if "タイトルを日本語に翻訳してください" in prompt:
+            return "日本語タイトル1@@@日本語タイトル2"
+        if "日本語に翻訳してください" in prompt:
+            return "日本語要約1@@@日本語要約2"
+        if "市場での立ち位置" in prompt:
+            return "プロフィール要約"
+        return "総合コメント"
+
+    result = generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=fake_call_llm,
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [
+            {
+                "title": "News 1",
+                "publisher": "社1",
+                "link": "http://example.com/1",
+                "summary": "Summary 1",
+            },
+            {
+                "title": "News 2",
+                "publisher": "社2",
+                "link": "http://example.com/2",
+                "summary": "Summary 2",
+            },
+        ],
+        analyze_fundamentals=lambda ticker: {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
+        analyze_technical=lambda history: {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+    )
+
+    assert result["news"][0]["title_ja"] == "日本語タイトル1"
+    assert result["news"][1]["title_ja"] == "日本語タイトル2"
+    assert result["news"][0]["summary_ja"] == "日本語要約1"
+    assert result["news"][1]["summary_ja"] == "日本語要約2"
+
+
+def test_generate_stock_detail_skips_summary_translation_call_when_no_news_have_summary(tmp_path):
+    def fake_call_llm(prompt):
+        if "ニュースタイトル" in prompt:
+            return "日本語タイトル"
+        if "ニュース要約" in prompt:
+            raise AssertionError("要約翻訳は呼ばない")
         if "市場での立ち位置" in prompt:
             return "プロフィール要約"
         return "総合コメント"
@@ -313,6 +370,7 @@ def test_generate_stock_detail_skips_translation_call_when_no_news_have_summary(
         },
     )
 
+    assert result["news"][0]["title_ja"] == "日本語タイトル"
     assert "summary_ja" not in result["news"][0]
 
 

@@ -252,7 +252,7 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     if not news_items:
         st.write("ニュースが取得できませんでした。")
     for item in news_items:
-        title = item.get("title") or "(タイトルなし)"
+        title = item.get("title_ja") or item.get("title") or "(タイトルなし)"
         publisher = item.get("publisher") or "?"
         link = item.get("link")
         if link:

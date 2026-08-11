@@ -73,3 +73,16 @@ def build_news_summary_translation_prompt(summaries: list[str]) -> str:
         "翻訳文以外の説明や前置きは出力しないでください。\n\n"
         f"{joined}"
     )
+
+
+def build_news_title_translation_prompt(titles: list[str]) -> str:
+    """ニュースタイトルを一括で日本語訳するためのプロンプトを組み立てる。"""
+    separator = "@@@"
+    joined = f"\n{separator}\n".join(titles)
+    return (
+        "以下は英文のニュースタイトルです。各タイトルを日本語に翻訳してください。\n"
+        f"翻訳文の間は区切り文字「{separator}」だけの行を挟み、"
+        "入力と同じ順序・同じ件数で出力してください。"
+        "翻訳文以外の説明や前置きは出力しないでください。\n\n"
+        f"{joined}"
+    )

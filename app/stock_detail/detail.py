@@ -19,6 +19,7 @@ from data_api.stock_price_api import fetch_price_history as default_fetch_price_
 from prompt_patterns.stock_detail import (
     build_company_profile_prompt,
     build_news_summary_translation_prompt,
+    build_news_title_translation_prompt,
     build_stock_detail_prompt,
 )
 
@@ -65,10 +66,28 @@ def generate_stock_detail(
         technical = analyze_technical(history)
         news = fetch_news(ticker)
 
-        # 画面表示専用に、要約(summary)がある記事だけをまとめて1回のLLM呼び出しで
-        # 日本語訳する。件数がズレた場合（LLMが指示通りの件数を返さなかった場合）は
-        # 誤った記事に翻訳を割り当てるリスクを避け、summary_jaを付けずに諦める
-        # （画面表示側は summary_ja が無ければ英文summaryにフォールバックする）。
+        # 画面表示専用に、タイトルと要約をまとめて1回ずつLLM呼び出しで日本語訳する。
+        # これにより、英語のタイトル/要約がそのまま表示されることを防ぐ。
+        # 件数がズレた場合（LLMが指示通りの件数を返さなかった場合）は
+        # 誤った記事に翻訳を割り当てるリスクを避け、翻訳結果を付けずに諦める。
+        title_indices = [i for i, item in enumerate(news) if item.get("title")]
+        if title_indices:
+            title_prompt = build_news_title_translation_prompt(
+                [news[i]["title"] for i in title_indices]
+            )
+            translated_titles = [part.strip() for part in call_llm(title_prompt).split("@@@")]
+            if len(translated_titles) == len(title_indices):
+                for index, translated in zip(title_indices, translated_titles):
+                    news[index]["title_ja"] = translated
+            else:
+                logger.warning(
+                    "ニュースタイトルの翻訳件数が入力件数と一致しませんでした"
+                    "（入力%d件、応答%d件）: ticker=%s",
+                    len(title_indices),
+                    len(translated_titles),
+                    ticker,
+                )
+
         indices_with_summary = [i for i, item in enumerate(news) if item.get("summary")]
         if indices_with_summary:
             translation_prompt = build_news_summary_translation_prompt(
