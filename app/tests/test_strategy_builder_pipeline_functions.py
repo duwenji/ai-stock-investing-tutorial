@@ -178,3 +178,54 @@ def test_run_multi_strategy_rank_picks_best_strategy_per_ticker(monkeypatch, tmp
     assert row["risk_adjusted_return"] == 4.0
     assert row["avg_risk_adjusted_return"] == 3.0
     assert row["profitable_strategy_count"] == 2
+
+
+def test_detect_recent_cross_true_when_cross_within_window():
+    dates = pd.date_range("2026-01-01", periods=6, freq="D")
+    fast = pd.Series([1, 1, 1, 5, 5, 5], index=dates, dtype=float)
+    slow = pd.Series([2, 2, 2, 2, 2, 2], index=dates, dtype=float)
+
+    assert pipeline_functions._detect_recent_cross(fast, slow, "up", within_days=5) is True
+
+
+def test_detect_recent_cross_false_when_cross_outside_window():
+    dates = pd.date_range("2026-01-01", periods=8, freq="D")
+    fast = pd.Series([1, 1, 5, 5, 5, 5, 5, 5], index=dates, dtype=float)
+    slow = pd.Series([2, 2, 2, 2, 2, 2, 2, 2], index=dates, dtype=float)
+    # クロス（下→上）は3日目（index=2）で発生。直近2日以内には無い。
+
+    assert pipeline_functions._detect_recent_cross(fast, slow, "up", within_days=2) is False
+
+
+def test_detect_recent_cross_false_when_insufficient_data():
+    dates = pd.date_range("2026-01-01", periods=3, freq="D")
+    fast = pd.Series([1, 2, 3], index=dates, dtype=float)
+    slow = pd.Series([2, 2, 2], index=dates, dtype=float)
+
+    assert pipeline_functions._detect_recent_cross(fast, slow, "up", within_days=5) is False
+
+
+def test_detect_recent_cross_detects_downward_direction():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    fast = pd.Series([5, 5, 1, 1], index=dates, dtype=float)
+    slow = pd.Series([2, 2, 2, 2], index=dates, dtype=float)
+
+    assert pipeline_functions._detect_recent_cross(fast, slow, "down", within_days=3) is True
+
+
+def test_detect_recent_threshold_cross_true_when_crossed_up_recently():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    series = pd.Series([20.0, 25.0, 35.0, 35.0], index=dates)
+
+    assert pipeline_functions._detect_recent_threshold_cross(
+        series, threshold=30.0, direction="up", within_days=2
+    ) is True
+
+
+def test_detect_recent_threshold_cross_false_when_never_crossed():
+    dates = pd.date_range("2026-01-01", periods=4, freq="D")
+    series = pd.Series([20.0, 21.0, 22.0, 23.0], index=dates)
+
+    assert pipeline_functions._detect_recent_threshold_cross(
+        series, threshold=30.0, direction="up", within_days=3
+    ) is False

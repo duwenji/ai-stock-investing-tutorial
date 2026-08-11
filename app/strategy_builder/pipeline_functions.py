@@ -143,3 +143,35 @@ def _run_multi_strategy_rank(candidates_df: pd.DataFrame, params: dict, cache_di
     if top_n is not None:
         result_df = result_df.head(top_n)
     return result_df
+
+
+def _detect_recent_cross(
+    fast: pd.Series, slow: pd.Series, direction: str = "up", within_days: int = 5,
+) -> bool:
+    """2系列が直近within_days営業日以内に交差したかを判定する。
+    データ不足（NaN混在含む）時はクロス無し（False）として扱う。"""
+    if len(fast) < within_days + 1:
+        return False
+    recent_fast, recent_slow = fast.iloc[-(within_days + 1):], slow.iloc[-(within_days + 1):]
+    if recent_fast.isna().any() or recent_slow.isna().any():
+        return False
+    is_above = fast > slow
+    # shift(1)はbool Seriesの先頭にNaNを挿入するためdtypeがobjectに昇格し、
+    # そのまま~を適用するとPythonのbool（int扱い）へのビット反転（~True=-2等、
+    # どちらも真値扱いになる）になってしまい論理否定にならない。astype(bool)で
+    # 明示的にbool dtypeへ戻してから~を適用する。
+    prev_above = is_above.shift(1).fillna(False).astype(bool)
+    crossed_up = is_above & ~prev_above
+    crossed_down = ~is_above & prev_above
+    recent = crossed_up if direction == "up" else crossed_down
+    return bool(recent.iloc[-within_days:].any())
+
+
+def _detect_recent_threshold_cross(
+    series: pd.Series, threshold: float, direction: str = "up", within_days: int = 5,
+) -> bool:
+    """1系列が直近within_days営業日以内に閾値を上抜け/下抜けしたかを判定する。"""
+    is_above = series >= threshold if direction == "up" else series <= threshold
+    prev_above = is_above.shift(1).fillna(False).astype(bool)
+    crossed = is_above & ~prev_above
+    return bool(crossed.iloc[-within_days:].any())
