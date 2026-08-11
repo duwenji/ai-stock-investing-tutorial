@@ -37,6 +37,7 @@ def test_run_update_calls_fetch_functions_for_every_company_profile_ticker(
     called_price = []
     called_fundamentals = []
     called_news = []
+    called_profile = []
 
     def fake_fetch_price_history(ticker, session_factory=None):
         called_price.append(ticker)
@@ -50,6 +51,10 @@ def test_run_update_calls_fetch_functions_for_every_company_profile_ticker(
         called_news.append(ticker)
         return []
 
+    def fake_fetch_company_profile(ticker, session_factory=None):
+        called_profile.append(ticker)
+        return {}
+
     monkeypatch.setattr(
         "scripts.update_market_data.fetch_price_history", fake_fetch_price_history
     )
@@ -57,15 +62,20 @@ def test_run_update_calls_fetch_functions_for_every_company_profile_ticker(
         "scripts.update_market_data.fetch_fundamentals", fake_fetch_fundamentals
     )
     monkeypatch.setattr("scripts.update_market_data.fetch_news", fake_fetch_news)
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_company_profile", fake_fetch_company_profile
+    )
 
     summary = run_update(session_factory=session_factory)
 
     assert sorted(called_price) == ["AAAA.T", "BBBB.T"]
     assert sorted(called_fundamentals) == ["AAAA.T", "BBBB.T"]
     assert sorted(called_news) == ["AAAA.T", "BBBB.T"]
+    assert sorted(called_profile) == ["AAAA.T", "BBBB.T"]
     assert summary["price_history"]["success"] == 2
     assert summary["fundamentals"]["success"] == 2
     assert summary["news"]["success"] == 2
+    assert summary["company_profile"]["success"] == 2
     assert summary["price_history"]["failed"] == []
 
 
@@ -89,6 +99,10 @@ def test_run_update_records_failures_without_stopping_other_tickers(
     monkeypatch.setattr(
         "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
     )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_company_profile",
+        lambda ticker, session_factory=None: {},
+    )
 
     summary = run_update(session_factory=session_factory)
 
@@ -96,6 +110,7 @@ def test_run_update_records_failures_without_stopping_other_tickers(
     assert summary["price_history"]["failed"] == ["AAAA.T"]
     assert summary["fundamentals"]["success"] == 2
     assert summary["news"]["success"] == 2
+    assert summary["company_profile"]["success"] == 2
 
 
 def test_main_exits_zero_when_all_succeed(monkeypatch, session_factory):
@@ -113,6 +128,10 @@ def test_main_exits_zero_when_all_succeed(monkeypatch, session_factory):
     )
     monkeypatch.setattr(
         "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
+    )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_company_profile",
+        lambda ticker, session_factory=None: {},
     )
     monkeypatch.setattr("scripts.update_market_data.init_db", lambda engine: None)
     # main()はsetup_logging()を呼ぶが、本物を使うと実際のapp/logs/を
@@ -140,6 +159,10 @@ def test_main_exits_one_when_any_ticker_fails(monkeypatch, session_factory):
     )
     monkeypatch.setattr(
         "scripts.update_market_data.fetch_news", lambda ticker, session_factory=None: []
+    )
+    monkeypatch.setattr(
+        "scripts.update_market_data.fetch_company_profile",
+        lambda ticker, session_factory=None: {},
     )
     monkeypatch.setattr("scripts.update_market_data.init_db", lambda engine: None)
     # main()はsetup_logging()を呼ぶが、本物を使うと実際のapp/logs/を

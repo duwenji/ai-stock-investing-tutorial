@@ -1,6 +1,7 @@
 """company_profilesに登録された全銘柄を対象に、price_history/
-fundamentals_snapshots/ticker_newsを更新するバッチ。Windowsタスク
-スケジューラ等から`update_market_data.bat`経由で定期実行する想定。
+fundamentals_snapshots/ticker_news/company_profile（sector/industry/
+business_summary）を更新するバッチ。Windowsタスクスケジューラ等から
+`update_market_data.bat`経由で定期実行する想定。
 
 実行方法（ai-stock-investing-tutorial/app ディレクトリで）:
     uv run python -m scripts.update_market_data
@@ -12,6 +13,7 @@ import sys
 from common.concurrency import map_concurrently
 from common.logging_config import log_duration, setup_logging
 from data_api.stock_price_api import (
+    fetch_company_profile,
     fetch_fundamentals,
     fetch_news,
     fetch_price_history,
@@ -46,8 +48,10 @@ def _run_phase(phase_name: str, tickers: list[str], fetch_fn, session_factory) -
 
 
 def run_update(session_factory=SessionLocal) -> dict:
-    """company_profiles全銘柄のprice_history/fundamentals_snapshots/ticker_news
-    を更新し、データ種別ごとの成功件数・失敗ticker一覧を返す。"""
+    """company_profiles全銘柄のprice_history/fundamentals_snapshots/ticker_news/
+    company_profile（sector/industry/business_summary）を更新し、データ種別ごとの
+    成功件数・失敗ticker一覧を返す。company_profileはfetch_company_profile内の
+    30日フレッシュネスチェックにより、直近取得済みの銘柄はyfinanceへ再取得しない。"""
     tickers = [p["ticker"] for p in load_all_company_profiles(session_factory=session_factory)]
     logger.info("市場データ更新バッチ開始: 対象%d銘柄", len(tickers))
 
@@ -59,6 +63,9 @@ def run_update(session_factory=SessionLocal) -> dict:
             "fundamentals", tickers, fetch_fundamentals, session_factory
         ),
         "news": _run_phase("news", tickers, fetch_news, session_factory),
+        "company_profile": _run_phase(
+            "company_profile", tickers, fetch_company_profile, session_factory
+        ),
     }
     return summary
 
