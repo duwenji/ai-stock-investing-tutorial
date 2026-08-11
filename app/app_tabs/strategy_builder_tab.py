@@ -28,11 +28,13 @@ from strategy_builder.sector_insight import build_watchlist_from_rotation
 from strategy_builder.storage import load_strategies, save_strategy
 
 from app_tabs.shared import (
+    CACHE_DIR,
     get_current_user_id,
     handle_table_selection,
     render_mermaid,
     run_or_load_sector_rotation,
 )
+from strategy_builder.pipeline import run_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +407,51 @@ def _render_screening_section() -> None:
         _render_screening_sector_network(result_df)
 
 
+def _render_pipeline_section() -> None:
+    strategy = st.session_state.get("strategy_confirmed")
+    st.subheader("③ パイプラインを実行")
+    if strategy is None:
+        st.caption("②で戦略を確定するか、保存済み戦略を読み込むと利用できます。")
+        return
+
+    st.write(f"対象戦略: **{strategy['strategy_name']}**")
+
+    if st.button("パイプラインを実行", key="strategy_run_pipeline"):
+        with st.spinner("パイプラインを実行中..."):
+            company_profiles = load_all_company_profiles()
+            all_tickers = [p["ticker"] for p in company_profiles]
+            names_by_ticker = {
+                p["ticker"]: p["name"] for p in company_profiles if p["name"]
+            }
+
+            result_df, trace = run_pipeline(strategy["steps"], all_tickers, CACHE_DIR)
+            result_df = result_df.copy()
+            result_df["name"] = result_df["ticker"].map(names_by_ticker).fillna("")
+
+            st.session_state["strategy_pipeline_result_df"] = result_df
+            st.session_state["strategy_pipeline_trace"] = trace
+            st.session_state["strategy_pipeline_selected_row"] = None
+            st.session_state["strategy_pipeline_result_table"] = {
+                "selection": {"rows": [], "columns": []}
+            }
+
+    trace = st.session_state.get("strategy_pipeline_trace")
+    if trace:
+        st.caption(" → ".join(trace))
+
+    result_df = st.session_state.get("strategy_pipeline_result_df")
+    if result_df is not None:
+        st.caption(f"該当銘柄（{len(result_df)}件）。行をクリックすると銘柄詳細を表示します。")
+        event = st.dataframe(
+            result_df,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="strategy_pipeline_result_table",
+        )
+        handle_table_selection("strategy_pipeline_selected_row", event, result_df)
+
+
 def render_strategy_builder_tab() -> None:
     logger.info("AI戦略ビルダータブを表示")
     st.header("AI戦略ビルダー")
@@ -428,7 +475,12 @@ def render_strategy_builder_tab() -> None:
     st.divider()
     _render_dialogue_section()
     st.divider()
-    _render_backtest_section()
-    st.divider()
-    _render_screening_section()
+
+    strategy = st.session_state.get("strategy_confirmed")
+    if strategy is not None and "steps" in strategy:
+        _render_pipeline_section()
+    else:
+        _render_backtest_section()
+        st.divider()
+        _render_screening_section()
     st.markdown(DISCLAIMER_NOTICE)
