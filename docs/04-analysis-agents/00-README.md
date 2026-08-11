@@ -59,3 +59,5 @@ Claude CodeなどMCP対応クライアントから、自然言語の質問に応
 ---
 
 投資判断に関わる内容です。必ず [免責事項](../../DISCLAIMER.md) をご確認ください。
+
+[← 前へ: 03-data-api](../03-data-api/00-README.md) | [次へ: ファンダメンタル分析エージェント →](01-fundamental-analysis-agent.md)

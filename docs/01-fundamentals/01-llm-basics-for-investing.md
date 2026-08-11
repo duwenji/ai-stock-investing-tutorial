@@ -163,4 +163,4 @@ LLMは「知らない」とは言わず、自信ありげに答える点が危�
 
 投資判断に関わる内容です。必ず [免責事項](../../DISCLAIMER.md) をご確認ください。
 
-[← 前へ: カテゴリ入口](00-README.md) | [次へ: ハルシネーション対策・ファクトチェック手法 →](02-hallucination-and-verification.md)
+[← 前へ: 01-fundamentals](00-README.md) | [次へ: ハルシネーション対策・ファクトチェック手法 →](02-hallucination-and-verification.md)

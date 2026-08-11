@@ -159,4 +159,4 @@ result = analyze_fundamentals("7203.T", sector_avg_per=14.2, sector_avg_pbr=1.1)
 
 投資判断に関わる内容です。必ず [免責事項](../../DISCLAIMER.md) をご確認ください。
 
-[← 前へ: 分析エージェント構築](00-README.md) | [次へ: テクニカル分析エージェント →](02-technical-analysis-agent.md)
+[← 前へ: 04-analysis-agents](00-README.md) | [次へ: テクニカル分析エージェント →](02-technical-analysis-agent.md)
