@@ -1,13 +1,18 @@
 import logging
 import subprocess
 
+import openai
 import pytest
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from data_api.llm_client import (
+    _SYSTEM_PROMPT,
     ClaudeCLIError,
     ClaudeCLINotFoundError,
+    OpenAIAPIError,
+    OpenAIAPIKeyMissingError,
+    _call_openai,
     _get_provider,
     _get_secret,
     call_llm,
@@ -144,3 +149,97 @@ def test_get_provider_defaults_to_claude_cli(monkeypatch):
 def test_get_provider_normalizes_case_and_whitespace(monkeypatch):
     monkeypatch.setattr(st, "secrets", {"llm_provider": "  OpenAI  "})
     assert _get_provider() == "openai"
+
+
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
+class _FakeCompletion:
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
+
+
+def test_call_openai_returns_response_text(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"openai_api_key": "test-key", "openai_model": "gpt-5"})
+
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeCompletion("  response text  \n")
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key):
+            captured["api_key"] = api_key
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    assert _call_openai("hello", 120) == "response text"
+    assert captured["api_key"] == "test-key"
+    assert captured["model"] == "gpt-5"
+    assert captured["timeout"] == 120
+    assert captured["messages"] == [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": "hello"},
+    ]
+
+
+def test_call_openai_uses_default_model_when_unset(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"openai_api_key": "test-key"})
+
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeCompletion("ok")
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    _call_openai("hello", 120)
+    assert captured["model"] == "gpt-5"
+
+
+def test_call_openai_raises_when_api_key_missing(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {})
+    with pytest.raises(OpenAIAPIKeyMissingError):
+        _call_openai("hello", 120)
+
+
+def test_call_openai_wraps_openai_errors(monkeypatch):
+    monkeypatch.setattr(st, "secrets", {"openai_api_key": "test-key"})
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            raise openai.APIConnectionError(request=None)
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    with pytest.raises(OpenAIAPIError):
+        _call_openai("hello", 120)

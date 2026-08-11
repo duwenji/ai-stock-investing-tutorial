@@ -5,6 +5,7 @@ import logging
 import shutil
 import subprocess
 
+import openai
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
@@ -21,6 +22,18 @@ class ClaudeCLINotFoundError(RuntimeError):
 
 class ClaudeCLIError(RuntimeError):
     """`claude`コマンドの実行がエラー終了した場合に送出する例外。"""
+
+    pass
+
+
+class OpenAIAPIKeyMissingError(RuntimeError):
+    """`llm_provider = "openai"` だが `openai_api_key` が未設定の場合に送出する例外。"""
+
+    pass
+
+
+class OpenAIAPIError(RuntimeError):
+    """OpenAI APIの呼び出しがエラーとなった場合に送出する例外。"""
 
     pass
 
@@ -84,6 +97,34 @@ def _call_claude_cli(prompt: str, timeout: int) -> str:
             raise ClaudeCLIError(f"Claude Code CLIの実行に失敗しました: {result.stderr.strip()}")
         logger.info("Claude CLIレスポンス: %s", result.stdout)
     return result.stdout.strip()
+
+
+def _call_openai(prompt: str, timeout: int) -> str:
+    """OpenAI Chat Completions APIにプロンプトを渡し、応答テキストを取得する。"""
+    api_key = _get_secret("openai_api_key")
+    if not api_key:
+        raise OpenAIAPIKeyMissingError(
+            "OpenAI APIキーが設定されていません。"
+            "`.streamlit/secrets.toml` に `openai_api_key = \"...\"` を設定してください。"
+        )
+    model = _get_secret("openai_model", "gpt-5")
+    with log_duration(logger, f"OpenAI API呼び出し（model={model}, prompt長={len(prompt)}）"):
+        logger.info("OpenAI APIリクエスト: %s", prompt)
+        client = openai.OpenAI(api_key=api_key)
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                timeout=timeout,
+            )
+        except openai.OpenAIError as exc:
+            raise OpenAIAPIError(f"OpenAI APIの呼び出しに失敗しました: {exc}") from exc
+        response_text = completion.choices[0].message.content.strip()
+        logger.info("OpenAI APIレスポンス: %s", response_text)
+    return response_text
 
 
 def call_llm(prompt: str, timeout: int = 120) -> str:
