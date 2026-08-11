@@ -119,13 +119,45 @@ def _ensure_ticker_news_summary_column(engine: Engine) -> None:
         connection.commit()
 
 
+def upsert_company_profile_name_and_sector_jp(
+    connection, ticker: str, name: str | None, sector_jp: str | None
+) -> None:
+    """company_profilesにticker行が無ければ(ticker, name, sector_jp)で新規作成し、
+    あってもname/sector_jpがNULLの場合はそのフィールドのみ埋める。既に値が入って
+    いる列（実際にyfinanceから取得済みの値や管理者が編集した値）は上書きしない。
+    呼び出し元がconnection.commit()すること（このヘルパー自体はコミットしない）。"""
+    existing = connection.execute(
+        text("SELECT name, sector_jp FROM company_profiles WHERE ticker = :ticker"),
+        {"ticker": ticker},
+    ).first()
+    if existing is None:
+        connection.execute(
+            text(
+                "INSERT INTO company_profiles (ticker, name, sector_jp) "
+                "VALUES (:ticker, :name, :sector_jp)"
+            ),
+            {"ticker": ticker, "name": name, "sector_jp": sector_jp},
+        )
+        return
+    existing_name, existing_sector_jp = existing
+    if existing_name is None and name is not None:
+        connection.execute(
+            text("UPDATE company_profiles SET name = :name WHERE ticker = :ticker"),
+            {"ticker": ticker, "name": name},
+        )
+    if existing_sector_jp is None and sector_jp is not None:
+        connection.execute(
+            text("UPDATE company_profiles SET sector_jp = :sector_jp WHERE ticker = :ticker"),
+            {"ticker": ticker, "sector_jp": sector_jp},
+        )
+
+
 def _seed_default_company_profiles(
     engine: Engine, seed_path: Path = SEED_COMPANY_PROFILES_PATH
 ) -> None:
     """seed_company_profiles.csv（旧UNIVERSE_NAMES/SECTOR_MAP相当の静的データ）を
-    company_profilesへ投入する。該当tickerの行が無ければ新規作成し、あっても
-    name/sector_jpがNULLの場合はそのフィールドのみ埋める。既に値が入っている列
-    （実際にyfinanceから取得済みの値や管理者が編集した値）は上書きしない。"""
+    company_profilesへ投入する。行ごとのupsertルールはupsert_company_profile_name_and_sector_jp
+    を参照。"""
     if not seed_path.exists():
         return
     with seed_path.open(encoding="utf-8", newline="") as f:
@@ -133,38 +165,9 @@ def _seed_default_company_profiles(
 
     with engine.connect() as connection:
         for seed_row in seed_rows:
-            ticker = seed_row["ticker"]
-            existing = connection.execute(
-                text("SELECT name, sector_jp FROM company_profiles WHERE ticker = :ticker"),
-                {"ticker": ticker},
-            ).first()
-            if existing is None:
-                connection.execute(
-                    text(
-                        "INSERT INTO company_profiles (ticker, name, sector_jp) "
-                        "VALUES (:ticker, :name, :sector_jp)"
-                    ),
-                    {
-                        "ticker": ticker,
-                        "name": seed_row["name"],
-                        "sector_jp": seed_row["sector_jp"],
-                    },
-                )
-                continue
-            existing_name, existing_sector_jp = existing
-            if existing_name is None:
-                connection.execute(
-                    text("UPDATE company_profiles SET name = :name WHERE ticker = :ticker"),
-                    {"ticker": ticker, "name": seed_row["name"]},
-                )
-            if existing_sector_jp is None:
-                connection.execute(
-                    text(
-                        "UPDATE company_profiles SET sector_jp = :sector_jp "
-                        "WHERE ticker = :ticker"
-                    ),
-                    {"ticker": ticker, "sector_jp": seed_row["sector_jp"]},
-                )
+            upsert_company_profile_name_and_sector_jp(
+                connection, seed_row["ticker"], seed_row["name"], seed_row["sector_jp"]
+            )
         connection.commit()
 
 

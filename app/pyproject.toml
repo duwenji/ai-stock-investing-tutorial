@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "streamlit>=1.59.2",
     "streamlit-authenticator>=0.4.2",
+    "xlrd>=2.0.2",
     "yfinance>=1.5.1",
 ]
 
