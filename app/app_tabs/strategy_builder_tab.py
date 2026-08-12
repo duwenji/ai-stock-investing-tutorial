@@ -1,28 +1,16 @@
 """AI戦略ビルダータブ: 投資アイデアの入力からAIとの対話によるロジック構築、
-簡易バックテスト、最新データでの銘柄選定までを一気通貫で行う。
+確定後のパイプライン実行（PIPELINE_FUNCTIONSベースのsteps）までを一気通貫で行う。
 """
 
 import logging
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 
 from common.disclaimer import DISCLAIMER_NOTICE
 from data_api.llm_client import call_llm
-from data_api.stock_price_api import (
-    fetch_universe_fundamentals,
-    fetch_universe_price_histories,
-    load_all_company_profiles,
-)
+from data_api.stock_price_api import load_all_company_profiles
 from prompt_patterns.strategy_dialogue import build_dialogue_prompt, parse_dialogue_response
-from sector_analysis.network import build_mermaid_lead_lag_graph
-from strategy_builder.backtest import run_strategy_backtest
-from strategy_builder.conditions import (
-    apply_strategy_conditions,
-    build_match_reason,
-    sort_by_strategy,
-)
 from strategy_builder.evaluation import run_evaluation_loop
 from strategy_builder.sector_insight import build_watchlist_from_rotation
 from strategy_builder.storage import load_strategies, save_strategy
@@ -31,7 +19,6 @@ from app_tabs.shared import (
     CACHE_DIR,
     get_current_user_id,
     handle_table_selection,
-    render_mermaid,
     run_or_load_sector_rotation,
 )
 from strategy_builder.pipeline import run_pipeline
@@ -139,6 +126,24 @@ def _render_idea_input_section() -> None:
         st.rerun()
 
 
+def _clear_strategy_execution_state() -> None:
+    """確定戦略が切り替わる（新規確定・別戦略の読み込み）タイミングで、前の戦略に
+    対する実行結果（パイプライン/バックテスト/銘柄選定）をセッションから消す。
+    消さないと、新しい戦略名のキャプションのまま前の戦略の結果テーブルが
+    表示され続けてしまう。"""
+    for key in (
+        "strategy_pipeline_result_df",
+        "strategy_pipeline_trace",
+        "strategy_pipeline_selected_row",
+        "strategy_pipeline_result_table",
+        "strategy_backtest_result",
+        "strategy_screening_result_df",
+        "strategy_screening_selected_row",
+        "strategy_screening_result_table",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _render_dialogue_section() -> None:
     st.subheader("② AIとの対話でロジックを構築")
 
@@ -154,6 +159,7 @@ def _render_dialogue_section() -> None:
                 st.session_state["strategy_confirmed"] = picked_strategy
                 st.session_state["strategy_chat_history"] = []
                 st.session_state["strategy_pending_strategy"] = None
+                _clear_strategy_execution_state()
                 st.rerun()
 
     history = st.session_state.get("strategy_chat_history")
@@ -205,6 +211,7 @@ def _render_dialogue_section() -> None:
                 st.session_state["strategy_confirmed"] = pending
                 st.session_state["strategy_pending_strategy"] = None
                 st.session_state["strategy_pending_evaluation"] = None
+                _clear_strategy_execution_state()
                 st.success(f"戦略「{pending['strategy_name']}」を保存しました。")
                 st.rerun()
         with continue_col:
@@ -229,182 +236,6 @@ def _render_dialogue_section() -> None:
         history.append({"role": "user", "content": user_reply})
         st.session_state["strategy_chat_history"] = history
         st.rerun()
-
-
-def _render_backtest_section() -> None:
-    strategy = st.session_state.get("strategy_confirmed")
-    st.subheader("③ バックテスト検証")
-    if strategy is None:
-        st.caption("②で戦略を確定するか、保存済み戦略を読み込むと利用できます。")
-        return
-
-    st.write(f"対象戦略: **{strategy['strategy_name']}**")
-    period = st.selectbox("バックテスト期間", ["1y", "2y"], key="strategy_backtest_period")
-
-    if st.button("バックテストを実行", key="strategy_run_backtest"):
-        with st.spinner("バックテストを実行中..."):
-            company_profiles = load_all_company_profiles()
-            tickers = [p["ticker"] for p in company_profiles]
-            names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
-            sector_jp_by_ticker = {
-                p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
-            }
-            universe_df = fetch_universe_fundamentals(tickers)
-            universe_df["name"] = universe_df["ticker"].map(names_by_ticker).fillna(
-                universe_df["name"]
-            )
-            universe_df["sector"] = universe_df["ticker"].map(sector_jp_by_ticker)
-            matched_df = apply_strategy_conditions(universe_df, strategy)
-            matched_tickers = matched_df["ticker"].tolist()
-
-            if not matched_tickers:
-                st.session_state["strategy_backtest_result"] = None
-                st.error("この戦略の条件に合致する銘柄が現在ありませんでした。")
-            else:
-                prices_by_ticker = fetch_universe_price_histories(matched_tickers, period)
-                result = run_strategy_backtest(prices_by_ticker)
-                st.session_state["strategy_backtest_result"] = result
-
-    result = st.session_state.get("strategy_backtest_result")
-    if result is not None:
-        metric_cols = st.columns(3)
-        metric_cols[0].metric("累積リターン(%)", result["total_return_pct"])
-        metric_cols[1].metric("最大ドローダウン(%)", result["max_drawdown_pct"])
-        metric_cols[2].metric("勝率(%)", result["win_rate_pct"])
-
-        equity_curve = result["equity_curve"]
-        if not equity_curve.empty:
-            chart_df = pd.DataFrame(
-                {"date": equity_curve.index, "value": equity_curve.values}
-            )
-            chart = (
-                alt.Chart(chart_df)
-                .mark_line()
-                .encode(x=alt.X("date:T", title="日付"), y=alt.Y("value:Q", title="資産推移（開始時=100）"))
-            )
-            st.altair_chart(chart, width="stretch")
-
-        st.subheader("銘柄別トータルリターン")
-        ticker_returns_df = pd.DataFrame(
-            [
-                {"ticker": ticker, "total_return_pct": value}
-                for ticker, value in result["ticker_returns"].items()
-            ]
-        )
-        st.dataframe(ticker_returns_df, hide_index=True)
-
-        st.caption(
-            "本バックテストは現在の財務指標で選んだ銘柄群を過去に遡って保有した想定であり、"
-            "過去時点で同条件を満たしていたかは考慮していません（先読みバイアスあり）。"
-        )
-        st.markdown(DISCLAIMER_NOTICE)
-
-
-def _render_screening_sector_network(result_df: pd.DataFrame) -> None:
-    st.subheader("選定銘柄の業種ネットワーク")
-    payload = st.session_state.get("sector_payload")
-    if payload is None:
-        period = st.selectbox(
-            "分析期間", ["1y", "2y"], key="strategy_screening_sector_period"
-        )
-        if st.button("今すぐ分析を実行", key="strategy_screening_run_sector_rotation"):
-            with st.spinner("業種ローテーション分析を実行中..."):
-                payload = run_or_load_sector_rotation(period, force_regenerate=False)
-            if payload is None:
-                st.error("分析可能な銘柄がありませんでした。")
-        if payload is None:
-            st.info(
-                "セクターローテーションタブ、または上のボタンで分析を実行すると、"
-                "選定銘柄の業種ネットワークが表示されます。"
-            )
-            return
-
-    sector_jp_by_ticker = {
-        p["ticker"]: p["sector_jp"] for p in load_all_company_profiles() if p["sector_jp"]
-    }
-    selected_sectors = set(result_df["ticker"].map(sector_jp_by_ticker).dropna())
-    network_df = pd.DataFrame(payload.get("network_pairs", []))
-    if network_df.empty:
-        st.info("業種間ネットワークのデータがありません。")
-        return
-    filtered_df = network_df[
-        network_df["leading_sector"].isin(selected_sectors)
-        | network_df["lagging_sector"].isin(selected_sectors)
-    ]
-
-    band = st.selectbox("周期帯", ["短期", "中期", "長期"], index=1, key="strategy_network_band")
-    threshold = st.slider(
-        "コヒーレンス閾値", 0.0, 1.0, 0.5, 0.05, key="strategy_network_threshold"
-    )
-    mermaid_code = build_mermaid_lead_lag_graph(filtered_df, band, threshold)
-    if mermaid_code is None:
-        st.info("十分な確信度を持つ関係が見つかりませんでした。閾値を下げてみてください。")
-    else:
-        render_mermaid(mermaid_code, height=400)
-
-
-def _render_screening_section() -> None:
-    strategy = st.session_state.get("strategy_confirmed")
-    st.subheader("④ 最新データで銘柄選定を実行")
-    if strategy is None:
-        st.caption("②で戦略を確定するか、保存済み戦略を読み込むと利用できます。")
-        return
-
-    if st.button("最新データで銘柄選定を実行", key="strategy_run_screening"):
-        with st.spinner("銘柄を絞り込み中..."):
-            company_profiles = load_all_company_profiles()
-            tickers = [p["ticker"] for p in company_profiles]
-            names_by_ticker = {p["ticker"]: p["name"] for p in company_profiles if p["name"]}
-            sector_jp_by_ticker = {
-                p["ticker"]: p["sector_jp"] for p in company_profiles if p["sector_jp"]
-            }
-            universe_df = fetch_universe_fundamentals(tickers)
-            universe_df["name"] = universe_df["ticker"].map(names_by_ticker).fillna(
-                universe_df["name"]
-            )
-            universe_df["sector"] = universe_df["ticker"].map(sector_jp_by_ticker)
-            matched_df = apply_strategy_conditions(universe_df, strategy)
-            matched_df = sort_by_strategy(matched_df, strategy)
-            matched_df = matched_df.copy()
-            matched_df["reason"] = matched_df.apply(
-                lambda row: build_match_reason(row, strategy.get("conditions", [])), axis=1
-            )
-
-            price_by_ticker = fetch_universe_price_histories(matched_df["ticker"].tolist(), "1y")
-
-            def _current_price(ticker: str) -> float | None:
-                series = price_by_ticker.get(ticker)
-                if series is None:
-                    return None
-                valid = series.dropna()
-                return round(float(valid.iloc[-1]), 1) if not valid.empty else None
-
-            matched_df["current_price"] = matched_df["ticker"].map(_current_price)
-
-            st.session_state["strategy_screening_result_df"] = matched_df
-            st.session_state["strategy_screening_selected_row"] = None
-            st.session_state["strategy_screening_result_table"] = {
-                "selection": {"rows": [], "columns": []}
-            }
-
-    result_df = st.session_state.get("strategy_screening_result_df")
-    if result_df is not None:
-        st.caption(f"該当銘柄（{len(result_df)}件）。行をクリックすると銘柄詳細を表示します。")
-        event = st.dataframe(
-            result_df,
-            column_config={
-                "ticker": st.column_config.TextColumn("銘柄コード"),
-                "name": st.column_config.TextColumn("銘柄名"),
-                "current_price": st.column_config.NumberColumn("現在の株価"),
-                "reason": st.column_config.TextColumn("判定理由"),
-            },
-            on_select="rerun",
-            selection_mode="single-row",
-            key="strategy_screening_result_table",
-        )
-        handle_table_selection("strategy_screening_selected_row", event, result_df)
-
-        _render_screening_sector_network(result_df)
 
 
 def _render_pipeline_section() -> None:
@@ -456,8 +287,8 @@ def render_strategy_builder_tab() -> None:
     logger.info("AI戦略ビルダータブを表示")
     st.header("AI戦略ビルダー")
     st.caption(
-        "投資アイデアの入力からAIとの対話によるロジック構築、簡易バックテスト、"
-        "最新データでの銘柄選定までを一気通貫で行います。"
+        "投資アイデアの入力からAIとの対話によるロジック構築、確定後のパイプライン"
+        "実行までを一気通貫で行います。"
     )
 
     if "strategy_idea_text" not in st.session_state:
@@ -475,12 +306,5 @@ def render_strategy_builder_tab() -> None:
     st.divider()
     _render_dialogue_section()
     st.divider()
-
-    strategy = st.session_state.get("strategy_confirmed")
-    if strategy is not None and "steps" in strategy:
-        _render_pipeline_section()
-    else:
-        _render_backtest_section()
-        st.divider()
-        _render_screening_section()
+    _render_pipeline_section()
     st.markdown(DISCLAIMER_NOTICE)

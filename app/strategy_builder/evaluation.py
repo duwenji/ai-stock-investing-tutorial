@@ -10,11 +10,12 @@ from prompt_patterns.strategy_dialogue import build_refinement_prompt
 def build_evaluate_prompt(strategy: dict) -> str:
     strategy_json = json.dumps(strategy, ensure_ascii=False, indent=2)
     return (
-        "以下は投資戦略のスクリーニング条件（JSON）です。\n\n"
+        "以下は投資戦略のスクリーニング/バックテストパイプライン（JSON）です。\n\n"
         f"{strategy_json}\n\n"
         '次の3つの基準で評価し、{"pass": true/false, "feedback": "..."} '
         "形式のJSONのみを出力してください（説明文やコードブロック記法は不要です）。\n"
-        "1. 条件が具体的か（indicator/valueが曖昧でないか）\n"
+        "1. 各ステップのfunction・paramsが具体的か（未指定・曖昧な閾値のまま"
+        "残っているparamsがないか）\n"
         "2. 条件数が極端に少なく／多くなく、対象銘柄が0件になりそうな過度な"
         "絞り込みでないか\n"
         "3. 断定的な投資助言表現（例: 「必ず上がる」「今すぐ買うべき」）を"
@@ -43,7 +44,7 @@ def run_evaluation_loop(
     """evaluate_strategyがpass=Trueを返すかmax_iterationsに達するまで、
     build_refinement_promptによる再生成を繰り返す。
 
-    改善案の応答がJSONとして無効、またはconditionsキーを含まない場合は、
+    改善案の応答がJSONとして無効、またはstepsキーを含まない場合は、
     そのイテレーションをスキップし直前のstrategyのままループを継続する。
     最後の評価イテレーションの後には改善案を生成しない。
     """
@@ -61,8 +62,7 @@ def run_evaluation_loop(
                 refined = json.loads(strip_code_fence(raw))
             except json.JSONDecodeError:
                 refined = None
-            expected_key = "steps" if "steps" in current else "conditions"
-            if isinstance(refined, dict) and expected_key in refined:
+            if isinstance(refined, dict) and "steps" in refined:
                 current = refined
 
     return {"strategy": current, "iterations": max_iterations, "last_feedback": last_feedback}

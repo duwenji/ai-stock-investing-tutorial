@@ -1,10 +1,6 @@
 import pandas as pd
 
-from strategy_builder.conditions import (
-    apply_strategy_conditions,
-    build_match_reason,
-    sort_by_strategy,
-)
+from strategy_builder.conditions import apply_strategy_conditions
 
 
 def test_apply_strategy_conditions_filters_rows_matching_all_conditions():
@@ -62,61 +58,3 @@ def test_apply_strategy_conditions_supports_sector_equals():
     strategy = {"conditions": [{"indicator": "SECTOR", "operator": "EQUALS", "value": "電気機器"}]}
     result = apply_strategy_conditions(df, strategy)
     assert result["ticker"].tolist() == ["AAA"]
-
-
-def test_build_match_reason_includes_sector():
-    row = pd.Series({"sector": "電気機器"})
-    conditions = [{"indicator": "SECTOR", "operator": "EQUALS", "value": "電気機器"}]
-    reason = build_match_reason(row, conditions)
-    assert reason == "業種 電気機器（条件: 電気機器と一致）"
-
-
-def test_sort_by_strategy_sorts_descending_by_indicator():
-    df = pd.DataFrame([{"ticker": "AAA", "roe_pct": 5.0}, {"ticker": "BBB", "roe_pct": 15.0}])
-    strategy = {"sort_by": "ROE", "order": "DESC"}
-    result = sort_by_strategy(df, strategy)
-    assert result["ticker"].tolist() == ["BBB", "AAA"]
-
-
-def test_sort_by_strategy_sorts_ascending_when_order_is_asc():
-    df = pd.DataFrame([{"ticker": "AAA", "roe_pct": 5.0}, {"ticker": "BBB", "roe_pct": 15.0}])
-    strategy = {"sort_by": "ROE", "order": "ASC"}
-    result = sort_by_strategy(df, strategy)
-    assert result["ticker"].tolist() == ["AAA", "BBB"]
-
-
-def test_sort_by_strategy_returns_unchanged_when_sort_by_unknown():
-    df = pd.DataFrame([{"ticker": "AAA", "roe_pct": 5.0}])
-    strategy = {"sort_by": "UNKNOWN", "order": "DESC"}
-    result = sort_by_strategy(df, strategy)
-    assert result["ticker"].tolist() == ["AAA"]
-
-
-def test_build_match_reason_includes_actual_value_and_threshold():
-    row = pd.Series({"per": 12.3, "roe_pct": 15.2})
-    conditions = [
-        {"indicator": "PER", "operator": "LESS_THAN", "value": 15},
-        {"indicator": "ROE", "operator": "GREATER_THAN", "value": 10},
-    ]
-    reason = build_match_reason(row, conditions)
-    assert "PER 12.3（条件: 15未満）" in reason
-    assert "ROE 15.2（条件: 10より大）" in reason
-
-
-def test_build_match_reason_skips_missing_values():
-    row = pd.Series({"per": None, "roe_pct": 15.2})
-    conditions = [
-        {"indicator": "PER", "operator": "LESS_THAN", "value": 15},
-        {"indicator": "ROE", "operator": "GREATER_THAN", "value": 10},
-    ]
-    reason = build_match_reason(row, conditions)
-    assert "PER" not in reason
-    assert "ROE 15.2（条件: 10より大）" in reason
-
-
-def test_build_match_reason_returns_placeholder_when_no_conditions_match():
-    row = pd.Series({"per": 12.3})
-    reason = build_match_reason(
-        row, [{"indicator": "UNKNOWN", "operator": "LESS_THAN", "value": 1}]
-    )
-    assert reason == "条件詳細なし"

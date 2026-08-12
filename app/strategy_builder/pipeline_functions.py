@@ -4,6 +4,7 @@
 という統一シグネチャを持つ。"""
 
 import json
+import time
 
 import pandas as pd
 
@@ -255,6 +256,26 @@ def _run_filter_current_signal(candidates_df: pd.DataFrame, params: dict, cache_
     return candidates_df[keep_mask]
 
 
+_COMPANY_PROFILES_CACHE_TTL_SECONDS = 30.0
+_company_profiles_cache: dict[str, object] = {"profiles": None, "fetched_at": 0.0}
+
+
+def _load_company_profiles_cached() -> list[dict]:
+    """load_all_company_profiles()の結果をプロセス内で短時間（30秒）だけ再利用する。
+    1回のパイプライン実行にFILTER_BY_FUNDAMENTALSステップが複数含まれる場合に、
+    ステップの回数だけcompany_profiles全件スキャンを繰り返さないようにする
+    （st.cache_dataは使わない。本モジュールはapp_tabs層に依存させない方針のため）。"""
+    now = time.monotonic()
+    fetched_at = _company_profiles_cache["fetched_at"]
+    if (
+        _company_profiles_cache["profiles"] is None
+        or now - fetched_at > _COMPANY_PROFILES_CACHE_TTL_SECONDS
+    ):
+        _company_profiles_cache["profiles"] = load_all_company_profiles()
+        _company_profiles_cache["fetched_at"] = now
+    return _company_profiles_cache["profiles"]
+
+
 def _run_filter_by_fundamentals(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataFrame:
     """PER/PBR/ROE等のファンダメンタルズ条件で絞り込む。候補銘柄にまだ
     ファンダメンタルズ/業種列が無い前提で、フィルタ前に取得・結合する。"""
@@ -262,12 +283,25 @@ def _run_filter_by_fundamentals(candidates_df: pd.DataFrame, params: dict, cache
         return candidates_df
     tickers = candidates_df["ticker"].tolist()
     fundamentals_df = fetch_universe_fundamentals(tickers)
-    profiles = load_all_company_profiles()
+    profiles = _load_company_profiles_cached()
     sector_jp_by_ticker = {p["ticker"]: p["sector_jp"] for p in profiles if p["sector_jp"]}
     fundamentals_df = fundamentals_df.assign(
         sector=fundamentals_df["ticker"].map(sector_jp_by_ticker)
+    ).drop(columns=["name"])
+    # candidates_dfが前段のFILTER_BY_FUNDAMENTALSステップ由来のper/sector等の列を
+    # 既に持っている場合、そのままmergeするとper_x/per_y等の重複列に化けてしまい、
+    # 後続のapply_strategy_conditionsが対象列を見失ってフィルタが無条件で通過して
+    # しまう。fundamentals_dfが持つ列と重複するcandidates_df側の列は先に落として
+    # から結合し、常に最新の取得結果で上書きする（同じステップの複数回実行に対して
+    # 冪等にする）。
+    overlap_columns = [
+        column
+        for column in fundamentals_df.columns
+        if column != "ticker" and column in candidates_df.columns
+    ]
+    merged_df = candidates_df.drop(columns=overlap_columns).merge(
+        fundamentals_df, on="ticker", how="left"
     )
-    merged_df = candidates_df.merge(fundamentals_df.drop(columns=["name"]), on="ticker", how="left")
     return apply_strategy_conditions(merged_df, {"conditions": params.get("conditions", [])})
 
 
@@ -276,7 +310,8 @@ def _run_sort_by(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.Dat
     field = params.get("field")
     if field not in candidates_df.columns:
         return candidates_df
-    ascending = params.get("order") != "DESC"
+    order = str(params.get("order", "")).strip().upper()
+    ascending = order != "DESC"
     return candidates_df.sort_values(field, ascending=ascending)
 
 

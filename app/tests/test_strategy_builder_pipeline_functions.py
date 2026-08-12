@@ -1,6 +1,17 @@
 import pandas as pd
+import pytest
 
 import strategy_builder.pipeline_functions as pipeline_functions
+
+
+@pytest.fixture(autouse=True)
+def _reset_company_profiles_cache():
+    """_load_company_profiles_cached()のプロセス内キャッシュはテスト間で共有される
+    モジュール変数のため、各テストの前に必ずクリアしてテスト順序に依存しないように
+    する。"""
+    pipeline_functions._company_profiles_cache["profiles"] = None
+    pipeline_functions._company_profiles_cache["fetched_at"] = 0.0
+    yield
 
 
 def test_run_backtest_rank_adds_source_strategy_and_sorts_by_risk_adjusted_return(
@@ -437,11 +448,70 @@ def test_run_filter_by_fundamentals_returns_empty_unchanged():
     assert result_df.empty
 
 
+def test_run_filter_by_fundamentals_is_idempotent_across_repeated_calls(monkeypatch, tmp_path):
+    """AIがsteps配列にFILTER_BY_FUNDAMENTALSを2回含めても（例えばPER条件と業種条件を
+    別ステップとして生成した場合）、2回目のmergeでper_x/per_y等の重複列に化けて
+    フィルタが無効化されないことを確認する回帰テスト。"""
+
+    def fake_fetch_universe_fundamentals(tickers):
+        return pd.DataFrame(
+            [
+                {"ticker": "AAA.T", "name": "A社", "per": 10.0, "pbr": 1.0,
+                 "dividend_yield_pct": 4.0, "market_cap": 100, "roe_pct": 12.0,
+                 "revenue_growth_pct": 5.0},
+                {"ticker": "BBB.T", "name": "B社", "per": 60.0, "pbr": 3.0,
+                 "dividend_yield_pct": 1.0, "market_cap": 200, "roe_pct": 8.0,
+                 "revenue_growth_pct": 2.0},
+            ]
+        )
+
+    monkeypatch.setattr(
+        pipeline_functions, "fetch_universe_fundamentals", fake_fetch_universe_fundamentals
+    )
+    monkeypatch.setattr(pipeline_functions, "load_all_company_profiles", lambda: [])
+
+    candidates_df = pd.DataFrame([{"ticker": "AAA.T"}, {"ticker": "BBB.T"}])
+    per_condition = {"conditions": [{"indicator": "PER", "operator": "LESS_THAN", "value": 50}]}
+
+    once_df = pipeline_functions._run_filter_by_fundamentals(candidates_df, per_condition, tmp_path)
+    twice_df = pipeline_functions._run_filter_by_fundamentals(once_df, per_condition, tmp_path)
+
+    assert "per_x" not in twice_df.columns and "per_y" not in twice_df.columns
+    assert list(twice_df.columns).count("per") == 1
+    assert twice_df["ticker"].tolist() == ["AAA.T"]
+
+
+def test_load_company_profiles_cached_reuses_result_within_ttl(monkeypatch):
+    call_count = {"n": 0}
+
+    def fake_load_all_company_profiles():
+        call_count["n"] += 1
+        return [{"ticker": "AAA.T", "sector_jp": "電気機器"}]
+
+    monkeypatch.setattr(
+        pipeline_functions, "load_all_company_profiles", fake_load_all_company_profiles
+    )
+
+    pipeline_functions._load_company_profiles_cached()
+    pipeline_functions._load_company_profiles_cached()
+
+    assert call_count["n"] == 1
+
+
 def test_run_sort_by_sorts_descending_by_field():
     df = pd.DataFrame([{"ticker": "AAA.T", "risk_adjusted_return": 1.0},
                         {"ticker": "BBB.T", "risk_adjusted_return": 5.0}])
     result_df = pipeline_functions._run_sort_by(
         df, {"field": "risk_adjusted_return", "order": "DESC"}, None
+    )
+    assert result_df["ticker"].tolist() == ["BBB.T", "AAA.T"]
+
+
+def test_run_sort_by_accepts_lowercase_order():
+    df = pd.DataFrame([{"ticker": "AAA.T", "risk_adjusted_return": 1.0},
+                        {"ticker": "BBB.T", "risk_adjusted_return": 5.0}])
+    result_df = pipeline_functions._run_sort_by(
+        df, {"field": "risk_adjusted_return", "order": "desc"}, None
     )
     assert result_df["ticker"].tolist() == ["BBB.T", "AAA.T"]
 

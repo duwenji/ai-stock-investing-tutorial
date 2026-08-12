@@ -40,17 +40,6 @@ def test_build_dialogue_prompt_omits_sector_list_when_not_given():
     assert "業種名のいずれか一つ" not in prompt  # 業種一覧の案内文は含まれない
 
 
-def test_parse_dialogue_response_detects_finalized_strategy_json():
-    raw = (
-        '```json\n{"strategy_name": "割安株", "conditions": '
-        '[{"indicator": "PER", "operator": "LESS_THAN", "value": 15}], '
-        '"sort_by": "PER", "order": "ASC"}\n```'
-    )
-    result = parse_dialogue_response(raw)
-    assert result["kind"] == "strategy"
-    assert result["strategy"]["strategy_name"] == "割安株"
-
-
 def test_parse_dialogue_response_detects_question_text():
     raw = "PERの閾値はいくつにしますか？"
     result = parse_dialogue_response(raw)
@@ -63,7 +52,7 @@ def test_parse_dialogue_response_treats_malformed_json_as_question():
     assert result["kind"] == "question"
 
 
-def test_parse_dialogue_response_requires_conditions_key_for_strategy():
+def test_parse_dialogue_response_requires_steps_key_for_strategy():
     raw = '{"strategy_name": "割安株"}'
     result = parse_dialogue_response(raw)
     assert result["kind"] == "question"
@@ -72,7 +61,7 @@ def test_parse_dialogue_response_requires_conditions_key_for_strategy():
 def test_build_refinement_prompt_includes_strategy_and_feedback():
     pending = {
         "strategy_name": "割安株",
-        "conditions": [{"indicator": "PER", "operator": "LESS_THAN", "value": 15}],
+        "steps": [{"function": "BACKTEST_RANK", "params": {"strategy": "移動平均クロスオーバー"}}],
     }
     prompt = build_refinement_prompt(pending, "条件が厳しすぎます")
     assert "割安株" in prompt
@@ -81,7 +70,7 @@ def test_build_refinement_prompt_includes_strategy_and_feedback():
 
 
 def test_build_refinement_prompt_lists_allowed_indicators_and_operators():
-    pending = {"strategy_name": "割安株", "conditions": []}
+    pending = {"strategy_name": "割安株", "steps": []}
     prompt = build_refinement_prompt(pending, "改善してください")
     assert "DIVIDEND_YIELD" in prompt
     assert "GREATER_EQUAL" in prompt

@@ -83,9 +83,8 @@ def build_dialogue_prompt(history: list[dict], sectors: list[str] | None = None)
 def parse_dialogue_response(raw: str) -> dict:
     """LLM応答を判定する。
 
-    JSONコードブロックとして解析でき、かつ`strategy_name`と（`steps`または
-    `conditions`）を含む場合は `{"kind": "strategy", "strategy": {...}}` を返す
-    （`steps`は新形式、`conditions`は後方互換の旧形式）。それ以外は質問・提案
+    JSONコードブロックとして解析でき、かつ`strategy_name`と`steps`を含む場合は
+    `{"kind": "strategy", "strategy": {...}}` を返す。それ以外は質問・提案
     テキストとして `{"kind": "question", "text": raw}` を返す。
     """
     try:
@@ -93,9 +92,8 @@ def parse_dialogue_response(raw: str) -> dict:
     except json.JSONDecodeError:
         return {"kind": "question", "text": raw.strip()}
 
-    if isinstance(parsed, dict) and "strategy_name" in parsed:
-        if "steps" in parsed or "conditions" in parsed:
-            return {"kind": "strategy", "strategy": parsed}
+    if isinstance(parsed, dict) and "strategy_name" in parsed and "steps" in parsed:
+        return {"kind": "strategy", "strategy": parsed}
     return {"kind": "question", "text": raw.strip()}
 
 
