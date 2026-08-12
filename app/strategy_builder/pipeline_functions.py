@@ -37,6 +37,9 @@ def _run_backtest_rank(candidates_df: pd.DataFrame, params: dict, cache_dir) -> 
     top_n = params.get("top_n")
     tickers = candidates_df["ticker"].tolist()
 
+    # バックテストは銘柄数×パラメータグリッドで計算コストが高いため、st.cache_dataでは
+    # なくディスクキャッシュ（common.cache）で結果を再利用する。同じ戦略・銘柄集合の
+    # 組み合わせなら、別ユーザー・別rerunでも再計算を避けられる。
     cache_key = build_universe_backtest_cache_key(
         [strategy_name], period, transaction_cost_pct, tickers
     )
@@ -327,6 +330,9 @@ def _run_top_n(candidates_df: pd.DataFrame, params: dict, cache_dir) -> pd.DataF
     return candidates_df.head(n)
 
 
+# このdictはprompt_patterns/strategy_dialogue.pyがdescription/params_schemaを
+# 読み取ってLLMへのシステムプロンプトを動的に組み立てる際にも使われるため、
+# キー名・説明文を変更するとAIが生成するsteps JSONの挙動にも影響する。
 PIPELINE_FUNCTIONS: dict[str, dict] = {
     "BACKTEST_RANK": {
         "description": (

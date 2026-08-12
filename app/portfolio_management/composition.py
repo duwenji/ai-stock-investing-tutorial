@@ -1,5 +1,6 @@
 """保有銘柄一覧と現在値から、評価額・損益・ポートフォリオ内構成比を
-算出するモジュール。"""
+算出するモジュール。portfolio_tab.py・qa_tab.py・review.py（AIレビュー生成）
+から共通の集計ロジックとして呼ばれる。"""
 
 
 def analyze_portfolio_composition(

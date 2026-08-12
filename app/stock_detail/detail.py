@@ -1,6 +1,11 @@
 """個別銘柄の詳細画面向けに、株価・ファンダメンタルズ・テクニカル分析・
 ニュース・LLMによる講評コメント・基本情報（業種・市場ポジション）を
-1つにまとめて生成するモジュール。"""
+1つにまとめて生成するモジュール。
+
+本モジュール自体はst.*を直接呼ばない。呼び出し元のapp_tabs/shared.py
+（show_stock_detail_dialog）がst.spinner()の中でgenerate_stock_detail()を呼び、
+処理中であることをユーザーに示す。
+"""
 
 import json
 import logging
@@ -45,6 +50,10 @@ def generate_stock_detail(
     テスト時にモック差し替えしやすくしている。
     """
     # 生成にはLLM呼び出しを含みコストが高いため、キャッシュがあれば再利用する。
+    # ここではst.cache_data（実行プロセスのメモリ上、rerun間だけ有効）ではなく
+    # common.cacheによる自前のディスクキャッシュを使っている。アプリ再起動後も
+    # 有効にしたい／全ユーザーで共有したい、という理由から@st.cache_dataではなく
+    # この方式を選んでいる。
     # 旧バージョンのキャッシュ（price_historyにopenキーが無い、profileキーが
     # 無い、またはtechnicalにRSI/ADX/ATRの時系列が無いもの）は無効として扱う。
     cache_key = f"stock-detail-{ticker}"

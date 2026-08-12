@@ -37,8 +37,10 @@ def render_screening_tab() -> None:
     )
 
     if condition_text:
-        # 入力条件が前回から変わった場合のみLLMを呼び出し、自然言語条件を
-        # 構造化フィルタ（JSON）に変換する。変わっていなければ結果をセッションから再利用する
+        # st.text_inputは入力のたびにrerunするため、1文字打つごとにこのブロックが
+        # 実行されうる。もしrerunのたびにLLMを呼ぶと無駄にコストがかかるため、
+        # 前回問い合わせた条件文をst.session_stateに保存しておき、変化がない
+        # rerun（他の操作によるものなど）ではLLM呼び出しをスキップして再利用する。
         if st.session_state.get("screening_condition_text") != condition_text:
             prompt = build_screening_prompt(
                 condition_text, sectors=sorted(set(sector_jp_by_ticker.values()))
@@ -61,6 +63,8 @@ def render_screening_tab() -> None:
         if filters is not None:
             # 実際に適用する前にAIが解釈した条件をユーザーに確認させる
             st.subheader("AIが解釈した条件（適用前に確認してください）")
+            # st.jsonは辞書やリストを折りたたみ可能なツリー表示で見せるStreamlit専用API。
+            # 生のJSON文字列をst.writeするより読みやすく、キーごとに開閉できる。
             st.json(filters)
 
             # 対象銘柄のファンダメンタルズを取得し、条件でフィルタしてAIコメントを付与する
@@ -76,6 +80,9 @@ def render_screening_tab() -> None:
                     # 時価総額は円単位だと桁が大きく読みにくいため、表示用に億円単位へ変換する
                     result_df = result_df.assign(market_cap=result_df["market_cap"] / 1e8)
 
+                    # 絞り込み結果をst.session_stateに保存する。ここで保存しておかないと、
+                    # この下の表示ブロックが依存する値は次のrerun（例: 表の行クリック）の
+                    # 時点でローカル変数ではなく消えてしまっている。
                     st.session_state["screening_result_df"] = result_df
                     st.session_state["screening_comments"] = comments
                     st.session_state["screening_selected_row"] = None

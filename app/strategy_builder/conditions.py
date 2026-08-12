@@ -38,6 +38,8 @@ def apply_strategy_conditions(df: pd.DataFrame, strategy: dict) -> pd.DataFrame:
     LLM出力のゆれがあっても処理全体を落とさない（既存のapply_filtersと同方針）。
     """
     result = df
+    # for毎にresultをその条件で絞り込み、次のconditionのフィルタ対象にする。
+    # つまりconditionsは暗黙的にすべてAND結合される（OR条件は表現できない）。
     for condition in strategy.get("conditions", []):
         indicator = condition.get("indicator")
         op_name = condition.get("operator")
@@ -46,6 +48,8 @@ def apply_strategy_conditions(df: pd.DataFrame, strategy: dict) -> pd.DataFrame:
         op_func = _OPERATORS.get(op_name)
         if column is None or column not in result.columns or op_func is None:
             continue
+        # NaN同士の比較はFalseになるが、notna()を明示しておくことで
+        # 「値が無い銘柄は条件を満たさない扱いにする」という意図を分かりやすくする。
         mask = result[column].notna() & op_func(result[column], value)
         result = result[mask]
     return result

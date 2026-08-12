@@ -36,6 +36,8 @@ def _render_grid_heatmap(grid_results: list[dict], param_grid: dict) -> None:
             for row in grid_results
         ]
     )
+    # altairのChartオブジェクトを組み立てるだけではまだ画面に表示されない。
+    # 呼び出し元でst.altair_chart()に渡して初めてStreamlit上に描画される。
     heatmap = (
         alt.Chart(grid_df)
         .mark_rect()
@@ -59,6 +61,8 @@ def _render_grid_heatmap(grid_results: list[dict], param_grid: dict) -> None:
 def _render_stability_summary(summary: dict) -> None:
     best = summary["best"]
     st.subheader("近傍グリッドサーチ・安定性チェック")
+    # st.columns(3)で3分割したコンテナのリストを受け取り、各要素に.metric()を
+    # 呼ぶことで数値を横並びのカードのように強調表示する。
     metric_cols = st.columns(3)
     metric_cols[0].metric("最良パラメータの累積リターン(%)", best["total_return_pct"])
     metric_cols[1].metric("最良パラメータの最大DD(%)", best["max_drawdown_pct"])
@@ -83,6 +87,9 @@ def render_backtest_tab() -> None:
     st.header("バックテスト")
 
     # 単一銘柄・単一戦略に対するバックテスト条件の入力
+    # 各ウィジェットにkey=を指定するとst.session_state[key]に値が自動保存される。
+    # そのため他のウィジェット操作でrerunが起きても、ユーザーが選んだ値はここで
+    # 再取得され画面に維持される（keyを省略すると内部的に自動生成されたキーが使われる）。
     backtest_strategy = st.selectbox(
         "戦略", list(STRATEGIES.keys()), key="backtest_strategy"
     )
@@ -99,9 +106,14 @@ def render_backtest_tab() -> None:
         "キャッシュを無視して再生成する", key="backtest_force_regenerate"
     )
 
+    # st.buttonはクリックされて発生したrerunでのみTrueになる。ここではand式の右側に
+    # 置くことで「銘柄コードが入力済み、かつ今このrerunでボタンが押された」場合だけ
+    # 下のバックテスト処理を実行する。
     if backtest_ticker and st.button("バックテストを実行"):
         strategy = STRATEGIES[backtest_strategy]
         transaction_cost_pct = 0.1 if apply_transaction_cost else 0.0
+        # cached_fetch_price_history（shared.py）は@st.cache_data付きなので、同じ銘柄・
+        # 期間の組み合わせであれば実際のデータ取得は行わずキャッシュ済みの結果を返す。
         history = cached_fetch_price_history(backtest_ticker, backtest_period)
 
         # 戦略が要求する最低データ日数を満たさない場合は実行できない旨を伝える

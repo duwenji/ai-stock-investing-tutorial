@@ -8,6 +8,8 @@ from prompt_patterns.strategy_dialogue import build_refinement_prompt
 
 
 def build_evaluate_prompt(strategy: dict) -> str:
+    """戦略JSONをLLMに渡し、パラメータの具体性・絞り込みすぎ・断定的な投資助言表現の
+    3点をチェックさせるプロンプトを組み立てる。戻り値のJSONは{"pass", "feedback"}のみ。"""
     strategy_json = json.dumps(strategy, ensure_ascii=False, indent=2)
     return (
         "以下は投資戦略のスクリーニング/バックテストパイプライン（JSON）です。\n\n"
@@ -25,6 +27,8 @@ def build_evaluate_prompt(strategy: dict) -> str:
     )
 
 
+# call_llmを引数として外から差し替え可能にしておくことで、テストコードでは
+# 本物のLLM呼び出しの代わりにダミー関数を渡せる（本番はdefault_call_llmが使われる）。
 def evaluate_strategy(strategy: dict, call_llm=default_call_llm) -> dict:
     raw = call_llm(build_evaluate_prompt(strategy))
     try:
@@ -56,6 +60,7 @@ def run_evaluation_loop(
             return {"strategy": current, "iterations": i, "last_feedback": last_feedback}
         last_feedback = evaluation["feedback"]
 
+        # 最後のイテレーションでは改善案を生成しない（どうせ再評価されないLLM呼び出しを省く）。
         if i < max_iterations - 1:
             raw = call_llm(build_refinement_prompt(current, last_feedback))
             try:

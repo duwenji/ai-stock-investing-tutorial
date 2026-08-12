@@ -79,6 +79,8 @@ def render_ranking_tab() -> None:
                 prices_by_ticker = {}
                 skipped_tickers = []
                 # 多数の銘柄の株価取得を並列化して待ち時間を短縮する
+                # map_concurrentlyで多数の銘柄を並列取得している間、st.spinnerで
+                # 処理中であることをユーザーに示す（完了するまでブロックは戻らない）。
                 with st.spinner(f"株価データを取得中...（{len(target_tickers)}銘柄）"):
                     price_results = map_concurrently(
                         target_tickers,
@@ -116,7 +118,12 @@ def render_ranking_tab() -> None:
                     write_cache(CACHE_DIR, cache_key, json.dumps(payload, ensure_ascii=False))
 
         if payload is not None:
-            # 再実行後もランキング結果を表示し続けられるようセッションに保持する
+            # 再実行後もランキング結果を表示し続けられるようセッションに保持する。
+            # ボタン押下時のifブロックはこのrerunでしか実行されないため、結果を
+            # ローカル変数のままにすると次のrerun（例: 表の行クリック）で消えてしまう。
+            # st.session_stateに入れておくことで、以降のrerunでも下の表示ブロックから読める。
+            # "ranking_table"はst.dataframeのkeyと同名で、選択状態を明示的に空へリセットする
+            # ために書き込んでいる（新しい実行結果に対して古い選択行が残らないようにする）。
             st.session_state["ranking_payload"] = payload
             st.session_state["ranking_strategy_label"] = ranking_strategy
             st.session_state["ranking_selected_row"] = None
@@ -151,6 +158,8 @@ def render_ranking_tab() -> None:
 
         st.subheader(f"{ranking_strategy_label}（銘柄ごとに近傍グリッドで最適化）ランキング")
         st.caption("行をクリックすると銘柄詳細を表示します。")
+        # column_configで列見出しを日本語化・数値フォーマットしているだけで、
+        # ranking_df自体の列名やデータ型は変更していない。
         event = st.dataframe(
             ranking_df,
             column_config={

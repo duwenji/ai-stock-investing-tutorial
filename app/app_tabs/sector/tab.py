@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 def render_sector_tab() -> None:
     logger.info("セクターローテーションタブを表示")
+    # StreamlitはUI操作のたびにこのスクリプトを再実行（rerun）するため、
+    # この関数もタブが表示されるたびに毎回最初から呼び直される
     st.header("セクターローテーション")
     st.caption(
         "UNIVERSE銘柄を17業種に分類し、業種間の値動きの時差相関（リード・ラグ）を"
@@ -41,6 +43,8 @@ def render_sector_tab() -> None:
         "network_diagram": "業種間ネットワーク（全ペア俯瞰）",
         "wavelet_analysis": "ウェーブレット分析",
     }
+    # st.expander()は折りたたみ可能なセクションを作る。表示設定という
+    # 頻繁には使わない機能を初期状態で隠しておき、画面をすっきりさせるために使う
     with st.expander("表示設定"):
         st.caption(
             "表示のON/OFFと並び順を指定できます"
@@ -57,6 +61,10 @@ def render_sector_tab() -> None:
                 for key, label in section_labels.items()
             ]
         )
+        # st.data_editor()はDataFrameをそのまま編集可能な表として表示するウィジェット。
+        # 戻り値は編集後のDataFrame。column_configで列ごとの表示方法を指定でき、
+        # "key": Noneのように値をNoneにすると列自体が非表示になり、
+        # TextColumn(disabled=True)は列を表示したまま編集だけ不可にする
         edited_df = st.data_editor(
             editor_df,
             column_config={
@@ -88,6 +96,9 @@ def render_sector_tab() -> None:
         ]
         for key, label in height_specs:
             if new_visible[key]:
+                # key=f"sector_height_{key}"のようにループ内でキーを動的に組み立て、
+                # 3つのスライダーそれぞれに一意なsession_stateキーを与えている
+                # （同じキーを使い回すとStreamlitがウィジェットを区別できずエラーになる）
                 new_height[key] = st.slider(
                     label,
                     250,
@@ -106,6 +117,8 @@ def render_sector_tab() -> None:
             save_sector_display_settings(get_current_user_id(), new_display_settings)
             display_settings = new_display_settings
 
+    # st.columns(3)は横並びの3つのコンテナ（列）を作る。取得期間・キャッシュ設定・
+    # 実行ボタンを1行に横並びで配置するために使う
     col_period, col_regen, col_run = st.columns(3)
     with col_period:
         sector_period = st.selectbox(
@@ -128,6 +141,8 @@ def render_sector_tab() -> None:
             ),
         )
     with col_run:
+        # st.button()はクリックされた直後の1回のrerunだけTrueを返す。
+        # 押していない状態やページの再読み込みでは常にFalseになる
         run_clicked = st.button(
             "分析を実行",
             help=(
@@ -137,10 +152,15 @@ def render_sector_tab() -> None:
         )
 
     if run_clicked:
+        # run_or_load_sector_rotation()の内部で計算結果をキャッシュしており、
+        # 同じ期間で分析済みなら重い相関計算・データ取得をやり直さずに済む
         payload = run_or_load_sector_rotation(sector_period, sector_force_regenerate)
         if payload is None:
             st.error("分析可能な銘柄がありませんでした。")
 
+    # run_or_load_sector_rotation()が結果をst.session_state["sector_payload"]にも
+    # 保存しているため、「分析を実行」ボタンを押していないrerun（表示設定を
+    # 変えたときなど）でも、前回の分析結果を使ってこの下の描画を続けられる
     if st.session_state.get("sector_payload") is not None:
         payload = st.session_state["sector_payload"]
         pairs = payload["pairs"]

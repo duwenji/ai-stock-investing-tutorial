@@ -35,6 +35,9 @@ def render_portfolio_tab() -> None:
     st.header("保有銘柄ポートフォリオ")
 
     # 初回表示時は保存済みの保有銘柄をロードする
+    # st.session_stateは通常の変数と違いrerunをまたいで値が残るため、この
+    # 「まだ無ければ設定する」パターンで、rerunのたびにDBへ再問い合わせすることなく
+    # 一度読み込んだ保有銘柄一覧をセッション中ずっと使い回せる。
     if "holdings_rows" not in st.session_state:
         st.session_state["holdings_rows"] = load_holdings(get_current_user_id())
 
@@ -49,6 +52,9 @@ def render_portfolio_tab() -> None:
         search_options = [""] + [
             f"{ticker} {name}" for ticker, name in sorted(candidate_names.items())
         ]
+        # label_visibility="collapsed"はウィジェット上のラベル文字を非表示にする指定
+        # （アクセシビリティ用のラベル自体は残るが画面上には出さない）。
+        # search_col内で他の部品と横並びに置くため見た目をすっきりさせる目的で使う。
         picked = st.selectbox(
             "銘柄コードまたは銘柄名で検索",
             search_options,
@@ -56,6 +62,8 @@ def render_portfolio_tab() -> None:
             label_visibility="collapsed",
         )
     with add_col:
+        # st.buttonはクリックされた直後のrerunでのみTrueを返す。ここでは戻り値を
+        # いったん変数に受け、下の追加処理で再利用している。
         add_clicked = st.button("追加")
 
     # 選択済み銘柄が一覧になければ保有銘柄リストに追加する（重複追加は防止）
@@ -80,6 +88,8 @@ def render_portfolio_tab() -> None:
         display_df = display_df[["ticker", "name", "shares", "cost"]]
 
         st.caption("行をクリックすると銘柄詳細を表示します。")
+        # column_config は列ごとの表示形式（見出し名や型）をカスタマイズするパラメータで、
+        # display_df自体のデータは変更しない（あくまで表示上の見た目の調整）。
         event = st.dataframe(
             display_df,
             column_config={
@@ -119,6 +129,8 @@ def render_portfolio_tab() -> None:
                     }
                     save_holdings(get_current_user_id(), holdings)
                     st.success("更新しました。")
+                    # 更新後すぐにrerunすることで、上の一覧表（display_df）を
+                    # 最新のholdings_rowsから作り直させ、変更を即座に画面へ反映する。
                     st.rerun()
             with delete_col:
                 st.write("")
@@ -165,6 +177,8 @@ def render_portfolio_tab() -> None:
 
                 # 保有銘柄すべてのデータ取得を並列化し、待ち時間を短縮する
                 holding_tickers = [holding["ticker"] for holding in holdings]
+                # st.spinnerはブロック実行中だけ「実行中...」表示を出す。並列取得中の
+                # 待ち時間、画面が固まったように見えないようユーザーへ進行中であることを示す。
                 with st.spinner("保有銘柄データを取得中..."):
                     holding_results = map_concurrently(holding_tickers, _fetch_holding_data)
 
@@ -210,6 +224,8 @@ def render_portfolio_tab() -> None:
             sentiment_info = payload["news_sentiment_by_ticker"].get(ticker, {})
             sentiment_label = sentiment_info.get("sentiment") or "不明"
             news_items = payload["news_by_ticker"].get(ticker, [])
+            # st.expanderで銘柄ごとに折りたたんでおくことで、保有銘柄が多くても
+            # 一覧全体が縦に間延びしないようにしている（クリックした分だけ開く）。
             with st.expander(f"{ticker} の参照ニュース（センチメント: {sentiment_label}）"):
                 if not news_items:
                     st.write("ニュースが取得できませんでした。")

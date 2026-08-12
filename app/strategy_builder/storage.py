@@ -23,6 +23,8 @@ def save_strategy(user_id: int, strategy: dict, session_factory=SessionLocal) ->
     上書きする。"""
     name = strategy.get("strategy_name")
     with session_factory() as session:
+        # updateではなく削除→追加で「上書き」を実現する（strategy_builder_tab.pyの
+        # 保存ボタン押下時に呼ばれる）。
         session.query(Strategy).filter_by(user_id=user_id, strategy_name=name).delete()
         session.add(
             Strategy(

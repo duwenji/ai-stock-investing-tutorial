@@ -1,12 +1,15 @@
 """保有銘柄群の価格系列から、ボラティリティ（変動率）や銘柄間の相関を
-算出し、ポートフォリオ全体のリスク指標を提供するモジュール。"""
+算出し、ポートフォリオ全体のリスク指標を提供するモジュール。
+qa_tab.pyやreview.py（AIレビュー生成）から呼ばれる。"""
 
 import pandas as pd
 
 
 def assess_risk(price_histories: dict[str, pd.Series]) -> dict:
     """各銘柄の年率ボラティリティ、銘柄間の相関行列、および等金額配分を
-    仮定したポートフォリオ全体のボラティリティを算出する。"""
+    仮定したポートフォリオ全体のボラティリティを算出する。
+    相関係数が低い（分散が効いている）銘柄同士を組み合わせるほど、
+    ポートフォリオ全体のボラティリティは各銘柄単体より小さくなりやすい。"""
     returns = pd.DataFrame(
         {ticker: series.pct_change().dropna() for ticker, series in price_histories.items()}
     )

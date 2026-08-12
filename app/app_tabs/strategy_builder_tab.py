@@ -33,6 +33,8 @@ _TEMPLATES = {
 
 
 def _render_sector_rotation_suggestion() -> None:
+    # st.expanderは初期状態で閉じた折りたたみコンテナ。分析に時間がかかるうえ
+    # 全ユーザーが使うわけではない補助機能なので、必要な人だけ開いて使う設計にしている。
     with st.expander("業種ローテーションから本日の注目銘柄を提案"):
         sector_period = st.selectbox(
             "分析期間", ["1y", "2y"], key="strategy_sector_period"
@@ -91,6 +93,10 @@ def _render_sector_rotation_suggestion() -> None:
             hide_index=True,
         )
         if st.button("この案をアイデア欄に反映", key="strategy_apply_watchlist_idea"):
+            # key="strategy_idea_text"を持つst.text_areaは、次に描画される際
+            # st.session_state["strategy_idea_text"]の値を初期表示に使う。
+            # ここで値を書き換えてからst.rerun()すると、その新しい値でテキストエリアが
+            # 再描画され、あたかも入力欄に自動入力されたように見える。
             st.session_state["strategy_idea_text"] = watchlist["idea_text"]
             st.rerun()
 
@@ -102,15 +108,21 @@ def _render_idea_input_section() -> None:
         "本日の値上がり銘柄からの提案も利用できます。"
     )
 
+    # テンプレート数に応じて可変個の等幅カラムを作り、ボタンを横並びに配置する。
     template_cols = st.columns(len(_TEMPLATES))
     for col, (label, template_text) in zip(template_cols, _TEMPLATES.items()):
         with col:
+            # key=f"...{label}" によりテンプレートボタンごとに別ウィジェットとして
+            # 扱われる（同じラベルの部品がループ内に複数あるとkeyなしではエラーになる）。
             if st.button(label, key=f"strategy_template_{label}"):
                 st.session_state["strategy_idea_text"] = template_text
                 st.rerun()
 
     _render_sector_rotation_suggestion()
 
+    # value=を渡さずkey=だけを指定しているため、この部品はst.session_state["strategy_idea_text"]
+    # を唯一の状態保持先として使う「keyだけウィジェット」になる。テンプレートボタンや
+    # 上の提案ボタンはこのキーへの書き込み経由でテキストエリアの内容を書き換えている。
     st.text_area(
         "投資アイデア",
         key="strategy_idea_text",
@@ -167,6 +179,10 @@ def _render_dialogue_section() -> None:
         st.caption("①でアイデアを入力し「対話を始める」を押すと、ここで対話が始まります。")
         return
 
+    # st.chat_messageはチャットの吹き出し風にコンテンツを表示する専用コンテナ。
+    # role（"user"/"assistant"）に応じてアイコンや配置が自動的に変わる。
+    # 会話履歴全体をst.session_stateに保存しておき、rerunのたびにここで全件を
+    # 描画し直すことで、画面上は会話が積み上がっているように見える。
     for turn in history:
         with st.chat_message(turn["role"]):
             st.write(turn["content"])
@@ -194,6 +210,10 @@ def _render_dialogue_section() -> None:
         else:
             history.append({"role": "assistant", "content": parsed["text"]})
             st.session_state["strategy_chat_history"] = history
+        # ここでst.rerun()せずに関数を抜けると、この後の`if pending is not None:`や
+        # チャット入力欄の描画コードが同じ実行内でそのまま続けて動いてしまい、
+        # 「AIの返信が追加された直後の画面」を正しい順序で描画し直せない。
+        # 明示的にrerunすることで、更新後のhistory/pendingを前提に最初から描画し直す。
         st.rerun()
 
     if pending is not None:
@@ -203,6 +223,8 @@ def _render_dialogue_section() -> None:
             st.caption("AIによる自動改善を行いました。")
             if evaluation_result["last_feedback"]:
                 st.caption(f"評価フィードバック: {evaluation_result['last_feedback']}")
+        # st.jsonは辞書を折りたたみ可能なツリー表示にする。確定前の戦略条件を
+        # そのままの構造でユーザーに確認させたいのでst.writeより適している。
         st.json(pending)
         confirm_col, continue_col = st.columns(2)
         with confirm_col:
@@ -231,6 +253,9 @@ def _render_dialogue_section() -> None:
                 st.rerun()
         return
 
+    # st.chat_inputはチャット向けの入力欄で、Enter送信すると入力文字列を返し
+    # 欄自体は自動的に空にリセットされる（st.text_inputのように前回値が残らない）。
+    # 送信されなければNoneを返すので、下のifで送信時のみ処理する。
     user_reply = st.chat_input("AIへの返信を入力", key="strategy_chat_input")
     if user_reply:
         history.append({"role": "user", "content": user_reply})
@@ -291,6 +316,9 @@ def render_strategy_builder_tab() -> None:
         "実行までを一気通貫で行います。"
     )
 
+    # 各キーを「まだ無ければ初期値を設定する」形で用意している。st.session_stateは
+    # rerunをまたいで値が保持されるため、これは通常の変数初期化と違い「セッション開始
+    # 時に1度だけ実行され、以降のrerunでは既存の値を上書きしない」という意味になる。
     if "strategy_idea_text" not in st.session_state:
         st.session_state["strategy_idea_text"] = ""
     if "strategy_chat_history" not in st.session_state:

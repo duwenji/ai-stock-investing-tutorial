@@ -1,3 +1,12 @@
+"""クロスウェーブレット変換により、2業種間の値動きが「何営業日ずれて連動しているか」を
+周期帯（短期/中期/長期）ごとに検出するモジュール。
+
+通常の相関係数は時間的に一定の関係しか捉えられないが、ウェーブレット変換なら
+「短期的には業種Aが先行するが、長期的には業種Bが先行する」といった周期ごとに
+異なるリード・ラグ関係を検出できる。結果はnetwork.py（Mermaid図）や
+correlation.pyと並んでセクターローテーション分析タブで使われる。
+"""
+
 import itertools
 import logging
 
@@ -9,8 +18,13 @@ from common.logging_config import log_duration
 
 logger = logging.getLogger(__name__)
 
+# 複素モルレーウェーブレット。位相情報（=リード・ラグの符号）を持つため、
+# 大きさのみの実数ウェーブレットではなくこちらを使う。"1.5-1.0"は
+# 帯域幅パラメータと中心周波数パラメータ（pywtの命名規則）。
 WAVELET = "cmor1.5-1.0"
 
+# 周期（営業日）を短期/中期/長期に分類する境界値。値が大きいほど
+# ゆっくりした（長期的な）値動きの周期を表す。
 PERIOD_BANDS: dict[str, tuple[float, float]] = {
     "短期": (4.0, 10.0),
     "中期": (10.0, 40.0),
@@ -60,6 +74,10 @@ def deserialize_sector_returns(
 def _build_scales(
     min_period_days: float, max_period_days: float, voices_per_octave: int
 ) -> tuple[np.ndarray, np.ndarray]:
+    # pywt.cwtは「周期」ではなく「スケール」というウェーブレット固有の単位で
+    # 動くため、対数間隔（geomspace）で刻んだ周期の並びをスケールに変換する。
+    # 対数間隔にするのは、短期の周期を細かく、長期の周期を粗くサンプルする方が
+    # 少ないスケール数で短期〜長期を効率よくカバーできるため。
     num_octaves = np.log2(max_period_days / min_period_days)
     n_scales = max(2, int(round(num_octaves * voices_per_octave)) + 1)
     periods = np.geomspace(min_period_days, max_period_days, n_scales)
@@ -110,10 +128,15 @@ def compute_cross_wavelet_lead_lag(
     syy = _smooth_along_time(coeffs_y * np.conj(coeffs_y), periods).real
     sxy = _smooth_along_time(coeffs_x * np.conj(coeffs_y), periods)
 
+    # コヒーレンス（0〜1）はクロススペクトルの正規化された強さで、その時点・
+    # その周期で2業種がどれだけ同期して動いているかを表す指標。1に近いほど
+    # 連動が強く、ラグの値も信頼できるとみなす。
     with np.errstate(divide="ignore", invalid="ignore"):
         coherence = np.abs(sxy) ** 2 / (sxx * syy)
     coherence = np.clip(np.nan_to_num(coherence, nan=0.0), 0.0, 1.0)
 
+    # クロスウェーブレットの位相差から、周期に対する時間差（何営業日分の
+    # ずれか）を算出する。位相はradianなので2πで正規化してから周期days倍する。
     phase = np.angle(sxy)
     lag_days = phase / (2 * np.pi) * periods[:, None]
 

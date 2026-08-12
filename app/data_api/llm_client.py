@@ -46,7 +46,9 @@ _SYSTEM_PROMPT = "あなたは指示に厳密に従うアシスタントです�
 def _get_secret(key: str, default: str | None = None) -> str | None:
     """`.streamlit/secrets.toml` から設定値を読む。secretsファイル自体が
     存在しない環境（フレッシュcloneでのpytest実行等）でも落ちないよう、
-    その場合はdefaultにフォールバックする。"""
+    その場合はdefaultにフォールバックする。
+    st.secretsはAPIキーのような機密情報をソースコードに直書きせずに
+    読み込むためのStreamlit専用の機能（app.pyのauth_cookie_keyと同じ用途）。"""
     try:
         return st.secrets.get(key, default)
     except StreamlitSecretNotFoundError:
@@ -142,6 +144,9 @@ def call_llm(prompt: str, timeout: int = 120) -> str:
     """設定されたLLMプロバイダにプロンプトを渡し、応答テキストを取得する。
 
     各分析エージェントやコメント生成処理から共通のLLM呼び出し口として利用される。
+    プロンプトが呼び出しごとに変わるためst.cache_dataによるキャッシュはせず、
+    呼ぶたびに実際にLLMへ問い合わせる（再実行のたびに前回と同じ結果を返して
+    しまうと困る用途のため）。
     """
     provider = _get_provider()
     if provider == "claude_cli":

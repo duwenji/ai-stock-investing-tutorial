@@ -6,6 +6,7 @@ import streamlit as st
 
 def render_pairs_table(pairs: list[dict]) -> None:
     """相関が強い順に、どちらの業種が何営業日先行して動く傾向があったかを一覧表示する。"""
+    # help=でsubheaderの横に(?)アイコンを表示し、ホバーで補足説明を出す
     st.subheader(
         "リード・ラグ上位ペア",
         help=(
@@ -16,6 +17,9 @@ def render_pairs_table(pairs: list[dict]) -> None:
     pairs_df = pd.DataFrame(pairs)[
         ["leading_sector", "lagging_sector", "lag_days", "correlation"]
     ]
+    # st.dataframe()はDataFrameをソート・スクロール可能な表として表示する。
+    # column_configで列ごとの表示名や型（テキスト/数値）を指定でき、
+    # hide_index=Trueでpandas標準の連番インデックス列を非表示にする
     st.dataframe(
         pairs_df,
         column_config={
@@ -27,6 +31,8 @@ def render_pairs_table(pairs: list[dict]) -> None:
         hide_index=True,
     )
 
+    # st.expander()は折りたたみ可能なセクションを作る。初期状態は閉じており、
+    # クリックすると開いて中の部品（ここではst.markdown）が表示される
     with st.expander("リード・ラグの読み方"):
         st.markdown(
             "「先行業種」の値動きに、「追随業種」が「ラグ（営業日）」で"

@@ -16,6 +16,8 @@ def run_pipeline(steps: list[dict], all_tickers: list[str], cache_dir) -> tuple[
     未知のfunction名や例外を送出したステップはスキップし、トレースに理由を記録して
     処理を継続する（既存apply_filtersと同じ「壊れたLLM出力で全体を落とさない」方針）。"""
     candidates_df = pd.DataFrame({"ticker": all_tickers})
+    # traceは各ステップ前後の件数推移を記録したログで、strategy_builder_tab.pyが
+    # 実行結果画面にそのまま表示する（ユーザーがどのステップで絞り込まれたか追える）。
     trace = [f"開始: {len(candidates_df)}件"]
 
     for step in steps:

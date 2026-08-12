@@ -65,6 +65,8 @@ def build_watchlist_from_rotation(
     """
     top_gainers = find_top_gaining_tickers(ticker_latest_return_pct, top_n=top_n)
 
+    # 値上がり上位から順に試し、業種・先行ペアが見つかった時点でreturnして打ち切る
+    # （複数の値上がり銘柄から候補を統合するのではなく、最初に見つかった1件だけを使う）。
     for gainer in top_gainers:
         leading_sector = sector_map.get(gainer["ticker"])
         if leading_sector is None:

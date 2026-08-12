@@ -44,6 +44,9 @@ def get_current_user_id() -> int:
 
 
 @st.cache_data(ttl=60)
+# st.cache_dataは引数の組み合わせごとに戻り値を保存し、同じ引数で再度呼ばれたら
+# 関数本体を実行せずキャッシュ値を返すStreamlit専用デコレータ。ttl=60は60秒で
+# キャッシュを失効させる指定で、それ以降は再度関数本体（＝下位のDB問い合わせ）が走る。
 def cached_fetch_japanese_name(ticker: str) -> str | None:
     """銘柄名はDB（CompanyProfile）で全ユーザー共有・長期キャッシュされているため、
     ここでは同一セッション内の連続rerunでDB問い合わせを繰り返さない薄い前段
@@ -75,11 +78,16 @@ def cached_fetch_news(ticker: str) -> list[dict]:
     return fetch_news(ticker)
 
 
+# st.dialogは関数をモーダルウィンドウとして描画するStreamlit専用デコレータ。
+# デコレートした関数を呼び出すとその場でポップアップが開き、関数内の st.xxx() 呼び出しは
+# すべてそのモーダルの中に描画される（普通の関数呼び出しのように見えるのが特徴）。
 @st.dialog("銘柄詳細情報", width="large")
 def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     """銘柄の株価チャート・ファンダメンタルズ・テクニカル・AIコメント・関連ニュースを
     1つのモーダルにまとめて表示する。各タブの一覧から銘柄をクリックした際の共通詳細画面として使う。
     """
+    # st.spinnerはブロックの実行が終わるまで「実行中...」というくるくる回るアイコンを
+    # 表示するStreamlit専用のコンテキストマネージャ。時間のかかる処理の待機中に使う。
     with st.spinner("銘柄情報を取得中..."):
         detail = generate_stock_detail(ticker, name, CACHE_DIR, call_llm=call_llm)
 
@@ -87,6 +95,8 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
 
     profile = detail.get("profile") or {}
     st.subheader("基本情報")
+    # st.columns(2)は横に2分割されたレイアウト用コンテナを返す。
+    # 戻り値を左から順に受け取り、各コンテナに部品を配置すると横並びに表示できる。
     profile_col1, profile_col2 = st.columns(2)
     profile_col1.write(f"業種: {profile.get('sector') or '―'}")
     profile_col2.write(f"詳細業種: {profile.get('industry') or '―'}")
@@ -155,6 +165,9 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
             color=alt.Color("MA:N", scale=ma_color_scale, title="移動平均線"),
         )
 
+        # st.altair_chartはaltairのChartオブジェクトをそのまま描画するStreamlit専用API。
+        # width="stretch"は横幅をコンテナいっぱいに広げる指定。チャートはrerunのたびに
+        # 作り直されるため、元データ（price_history等）は上位でキャッシュ済みのものを使う。
         st.altair_chart((wick + body + ma_lines).properties(height=300), width="stretch")
 
         # 出来高は価格チャートの下に別チャートとして表示する
@@ -212,6 +225,8 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
 
     # 主要ファンダメンタルズ指標をメトリクスとして横並びに表示する
     fundamentals = detail["fundamentals"]
+    # st.metricはラベル・値・（任意で）前回比を強調表示する専用ウィジェット。
+    # 単なるst.writeと違い、数値を目立たせたいダッシュボード的な表示に向く。
     col1, col2, col3 = st.columns(3)
     col1.metric("PER", fundamentals.get("per") if fundamentals.get("per") is not None else "―")
     col2.metric("PBR", fundamentals.get("pbr") if fundamentals.get("pbr") is not None else "―")
@@ -262,6 +277,8 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
         # 要約は日本語訳（summary_ja）を優先し、翻訳が無ければ英文原文（summary）を表示する
         summary_text = item.get("summary_ja") or item.get("summary")
         if summary_text:
+            # st.expanderは初期状態で閉じた折りたたみコンテナ。クリックで開閉でき、
+            # 長い補足情報を画面占有せずに置いておきたいときに使う。
             with st.expander("要約を見る"):
                 st.write(summary_text)
 
@@ -271,6 +288,11 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
 def handle_table_selection(state_key: str, event, df: pd.DataFrame) -> None:
     """データフレーム表の行選択イベントを処理する共通ヘルパー。
     選択行の変化をセッション状態に記録し、新たに選択された銘柄の詳細ダイアログを開く。
+
+    st.dataframe(on_select="rerun")付きの表は行クリックのたびにrerunし、
+    eventには「その時点で選択されている行」が入るだけで前回との差分は分からない。
+    そのためst.session_stateに前回の選択値を保存しておき、比較することで
+    「今回新たに選択された」ケースだけダイアログを開くようにしている。
     """
     current = event.selection.rows[0] if event.selection.rows else None
     if current != st.session_state.get(state_key):
@@ -321,6 +343,8 @@ def render_mermaid(code: str, height: int = 400) -> None:
       }});
     </script>
     """
+    # st.iframeは任意のHTML文字列をサンドボックス化されたiframe内に描画するStreamlit専用API。
+    # mermaid.js等、Streamlit標準部品には無いJSライブラリを埋め込みたい場合に使う。
     st.iframe(html, height=height)
 
 
@@ -335,6 +359,9 @@ def run_or_load_sector_rotation(period: str, force_regenerate: bool) -> dict | N
     セクタータブ・AI戦略ビルダータブの両方から呼ばれる共通処理。同一の
     period・対象銘柄集合であればディスクキャッシュを共有し、二重計算を避ける。
     実行結果は st.session_state["sector_payload"] にも保存する。
+    st.session_state はタブをまたいで共有される（app.pyの各タブは同じPythonプロセス・
+    同じセッション内で実行されるため）ので、ここに保存した値をセクタータブと
+    AI戦略ビルダータブの両方が後から読み出せる。
     """
     company_profiles = load_all_company_profiles()
     sector_jp_by_ticker = {

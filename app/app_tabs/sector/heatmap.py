@@ -11,6 +11,8 @@ def render_heatmap(pairs: list[dict], height: int) -> None:
         {pair["leading_sector"] for pair in pairs}
         | {pair["lagging_sector"] for pair in pairs}
     )
+    # 相関行列はA→BとB→Aで同じ値になる（対称行列）ため、対角成分を1.0で
+    # 初期化した上で、各ペアの値を[a,b]と[b,a]の両方に書き込んで作る
     corr_matrix = pd.DataFrame(1.0, index=sectors, columns=sectors)
     for pair in pairs:
         a, b = pair["leading_sector"], pair["lagging_sector"]
@@ -25,6 +27,7 @@ def render_heatmap(pairs: list[dict], height: int) -> None:
         .rename(columns={"index": "sector_a"})
     )
 
+    # help=でsubheaderの横に(?)アイコンを表示し、ホバーで補足説明を出す
     st.subheader(
         "業種間相関ヒートマップ",
         help=(
@@ -46,4 +49,6 @@ def render_heatmap(pairs: list[dict], height: int) -> None:
         .properties(height=height)
         .interactive()
     )
+    # st.altair_chart()はAltairのグラフオブジェクトをそのままブラウザに描画する
+    # Streamlit専用API。width="stretch"は親コンテナの横幅いっぱいに広げる指定
     st.altair_chart(heatmap, width="stretch")

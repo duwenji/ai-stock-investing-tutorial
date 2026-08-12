@@ -57,6 +57,10 @@ def _render_strategy_management() -> None:
         ]
     )
     st.caption("行をクリックすると内容を編集できます。")
+    # on_select="rerun"を指定すると、行クリック時にStreamlitがスクリプトを再実行(rerun)し、
+    # 戻り値のevent.selection.rowsに選択中の行インデックスが入る（複数選択がありうるため
+    # リスト形式で返る点に注意）。key=はこのウィジェットの状態をst.session_state内で
+    # 一意に識別するための名前で、同一画面に同種の部品が複数ある場合は必須。
     event = st.dataframe(
         display_df,
         hide_index=True,
@@ -73,6 +77,9 @@ def _render_strategy_management() -> None:
 
     selected = strategies[selected_idx]
     st.caption(f"選択中: {selected['username']} / {selected['strategy_name']}")
+    # key=f"...{selected['id']}" のように選択中の行IDをkeyに含めることで、選択行が
+    # 変わるたびに別ウィジェット扱いになり、前の行で入力途中だった値が新しい行に
+    # 引き継がれてしまう事故を防いでいる。
     json_text = st.text_area(
         "strategy_json",
         value=json.dumps(selected["strategy_json"], ensure_ascii=False, indent=2),
@@ -81,10 +88,15 @@ def _render_strategy_management() -> None:
     )
     save_col, delete_col = st.columns(2)
     with save_col:
+        # st.buttonはクリックされた直後の1回のrerunでのみTrueを返す（その次のrerunでは
+        # また自動的にFalseに戻る）。そのためボタン押下時の処理はifブロックの中に書く。
         if st.button("保存", key=f"admin_strategy_save_{selected['id']}"):
             try:
                 update_strategy_json_by_id(selected["id"], json_text)
                 st.success("更新しました。")
+                # st.rerunはその場でスクリプトを再実行させるStreamlit専用命令。
+                # 保存後すぐに呼ぶことで、DBの最新状態を反映した一覧に即座に更新できる
+                # （呼ばなければ次にユーザーが何か操作するまで画面は更新されない）。
                 st.rerun()
             except json.JSONDecodeError as exc:
                 st.error(f"JSONの形式が不正です: {exc}")
@@ -160,6 +172,8 @@ def _render_user_management() -> None:
 
 def _render_market_data_management() -> None:
     st.subheader("市場データ管理")
+    # st.text_inputは1文字入力するたびにrerunを発生させ、その時点の入力値を返す
+    # （st.form内と違い即時反映される）。空文字ならこの下の編集UIを描画せず早期returnする。
     ticker = st.text_input("銘柄コード（例: 7203.T）", key="admin_market_data_ticker")
     if not ticker:
         st.caption("銘柄コードを入力すると、株価履歴・fundamentals・企業プロファイルを編集できます。")
@@ -170,6 +184,9 @@ def _render_market_data_management() -> None:
     price_df = pd.DataFrame(
         price_rows, columns=["date", "open", "high", "low", "close", "volume"]
     )
+    # st.data_editorはセルを直接編集できるテーブルウィジェット。num_rows="dynamic"を
+    # 指定すると行の追加・削除も可能になる。戻り値は編集後のDataFrameで、元のprice_dfは
+    # 変更されない（保存するにはこの戻り値を明示的にDB書き込み関数へ渡す必要がある）。
     edited_price_df = st.data_editor(
         price_df,
         num_rows="dynamic",
@@ -212,6 +229,11 @@ def _render_market_data_management() -> None:
 
     st.markdown("**企業プロファイル（CompanyProfile）**")
     profile = load_company_profile(ticker) or {}
+    # st.formで囲んだ中の入力ウィジェットは、値を変更しただけではrerunが発生しない
+    # （通常のst.text_input等は1文字入力するたびにrerunするが、フォーム内は違う）。
+    # フォーム内のst.form_submit_button（「送信」専用ボタン）が押されたときに初めて
+    # まとめてrerunし、その時点の各入力値を読み取れる。複数項目を一括入力させたい
+    # ときに、入力途中の余計なrerunを避けられるのが利点。
     with st.form(key=f"admin_company_profile_form_{ticker}"):
         name = st.text_input("日本語銘柄名", value=profile.get("name") or "")
         sector = st.text_input("業種", value=profile.get("sector") or "")

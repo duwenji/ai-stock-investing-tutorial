@@ -1,6 +1,13 @@
 """yfinanceおよびYahoo!ファイナンス（日本版）から株価・ファンダメンタルズ・
 ニュース等の市場データを取得するAPIラッパー群。取得結果のキャッシュ・
-複数銘柄の並行取得もあわせて提供する。"""
+複数銘柄の並行取得もあわせて提供する。
+
+キャッシュはst.cache_data（Streamlitのプロセス内メモリキャッシュ）ではなく
+DBへの保存（read-through方式。鮮度チェックして古ければ取得しDBへ書き込む）
+で行う。複数ユーザー・複数プロセス間でも取得結果を共有でき、アプリを
+再起動してもキャッシュが消えないため、外部APIへの問い合わせ回数を
+st.cache_data以上に減らせる。
+"""
 
 import datetime
 import logging
@@ -176,6 +183,9 @@ def fetch_price_history(
             .limit(1)
             .scalar()
         )
+        # DB上のデータが本日から1日以内ならyfinanceへは問い合わせずDBの値をそのまま使う。
+        # Streamlitはユーザー操作のたびにスクリプト全体を再実行するため、この鮮度チェックが
+        # 無いと画面を触るたびに同じ銘柄のAPIを何度も叩いてしまう（レート制限にも抵触しうる）。
         is_fresh = latest_date_str is not None and (
             datetime.date.today() - datetime.date.fromisoformat(latest_date_str)
         ).days <= 1
@@ -236,6 +246,9 @@ def fetch_fundamentals(ticker_symbol: str, session_factory=SessionLocal) -> dict
     として追加する（同日内は追加取得しない）。"""
     today = datetime.date.today().isoformat()
     with session_factory() as session:
+        # 当日分のスナップショットが既にあればそれを返し、無い場合のみyfinanceへ
+        # 問い合わせる。fetch_price_historyのis_fresh判定と同じ考え方で、
+        # Streamlitの再実行のたびに外部APIを叩かないための仕組み。
         row = (
             session.query(FundamentalsSnapshot)
             .filter_by(ticker=ticker_symbol, snapshot_date=today)

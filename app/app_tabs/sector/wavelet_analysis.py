@@ -24,15 +24,19 @@ def render_wavelet_analysis(
 ) -> None:
     """選択した2業種について、周期の長さ（短期・中期・長期）ごとに時間変化する
     先行・追随関係を可視化する。"""
+    # help=でsubheaderの横に(?)アイコンを表示し、ホバーで補足説明を出す
     st.subheader(
         "ウェーブレット分析（時間変化するリード・ラグ）",
         help="時間の経過とともに変化する、業種間の先行・追随関係を可視化します。",
     )
+    # st.caption()は補足説明用の小さめグレー文字を表示するStreamlit専用API
     st.caption(
         "選択した2つの業種について、値動きの周期の長さ（短期・中期・長期）ごとに、"
         "どちらの業種がどれくらい先行しているかの時間変化を可視化します。"
         "色が薄い部分は関係の確からしさ（コヒーレンス）が低いことを示します。"
     )
+    # st.expander()は折りたたみ可能なセクションを作る。長い解説文を初期状態では
+    # 隠しておき、必要なユーザーだけがクリックして開けるようにするために使う
     with st.expander("ウェーブレット分析とは？"):
         st.markdown(
             "通常の相関分析は「期間全体で1つの数値」を計算しますが、実際の"
@@ -68,12 +72,16 @@ def render_wavelet_analysis(
         if default_y not in sector_options or default_y == default_x:
             default_y = next(s for s in sector_options if s != default_x)
 
+        # st.columns(2)は横並びの2つのコンテナ（列）を作り、業種Aと業種Bの
+        # セレクトボックスを横に並べて配置するために使う
         col_a, col_b = st.columns(2)
         sector_select_help = (
             "比較したい2つの業種を選びます"
             "（デフォルトは相関上位ペアの先行・追随業種）。"
         )
         with col_a:
+            # key="wavelet_sector_x"を指定することで選択状態がst.session_stateに
+            # 保存され、他の操作でrerunが起きても選んだ業種が保持される
             sector_x = st.selectbox(
                 "業種A",
                 sector_options,
@@ -90,6 +98,10 @@ def render_wavelet_analysis(
                 help=sector_select_help,
             )
 
+        # st.button()はクリックされた直後の1回のrerunだけTrueを返し、
+        # それ以外（他ウィジェット操作によるrerunなど）は常にFalseになる。
+        # そのため計算結果はこのifブロック内でst.session_stateに保存しておかないと、
+        # 次のrerunで画面から消えてしまう
         if st.button("ウェーブレット分析を実行"):
             all_series = deserialize_sector_returns(payload["sector_returns"])
             try:
@@ -106,6 +118,8 @@ def render_wavelet_analysis(
                 )
                 st.session_state["wavelet_result"] = None
             else:
+                # 通常の変数と違いst.session_stateに入れた値はrerunをまたいで残るため、
+                # ボタンが押された次のrerun以降もこの計算結果を使って描画を続けられる
                 st.session_state["wavelet_result"] = {
                     "df": wavelet_df,
                     "x": sector_x,
@@ -116,6 +130,9 @@ def render_wavelet_analysis(
         if wavelet_result is not None:
             wavelet_df = wavelet_result["df"]
 
+            # 横軸=日付、縦軸=周期の長さ（営業日）のマス目に対して、
+            # 色でラグの向き（正=業種Aが先行/負=業種Bが先行）、
+            # 濃淡でコヒーレンス（関係の確からしさ）を同時に表現するヒートマップ
             heatmap = (
                 alt.Chart(wavelet_df)
                 .mark_rect()
@@ -144,8 +161,13 @@ def render_wavelet_analysis(
                 .properties(height=height)
                 .interactive()
             )
+            # st.altair_chart()はAltairのグラフオブジェクトをそのままブラウザに
+            # 描画する。width="stretch"は親コンテナの横幅いっぱいに広げる指定
             st.altair_chart(heatmap, width="stretch")
 
+            # key="wavelet_band"はst.session_stateに選択状態を保持する。
+            # このセレクトボックスはst.button（実行ボタン）を介さず、
+            # 値を変えるだけで自動的にrerunされ、下のグラフが即座に更新される
             band = st.selectbox(
                 "周期帯",
                 ["短期", "中期", "長期"],
@@ -161,6 +183,8 @@ def render_wavelet_analysis(
             if band_df.empty:
                 st.info("この周期帯には有効なデータがありませんでした。")
             else:
+                # 選んだ周期帯の中でコヒーレンスが高いデータを重視した、
+                # 平均的な先行・遅行日数（支配的ラグ）の時系列を計算する
                 dominant = compute_dominant_lag_series(band_df)
                 line = (
                     alt.Chart(dominant)
@@ -183,6 +207,8 @@ def render_wavelet_analysis(
                     snap_lagging = sector_y if snap_lag >= 0 else sector_x
 
                     col_lag, col_coherence = st.columns(2)
+                    # st.columns()が返す各列オブジェクトに対してcol.metric()のように
+                    # 直接メソッドを呼ぶと、st.metric()と同じ数値カード表示がその列内に出る
                     col_lag.metric("支配的ラグ（日）", f"{snap_lag:+.1f}")
                     col_coherence.metric(
                         "コヒーレンス", f"{snapshot['avg_coherence']:.2f}"
@@ -201,12 +227,18 @@ def render_wavelet_analysis(
                         "AI解説のキャッシュを無視して再生成する",
                         key="wavelet_comment_force_regenerate",
                     )
+                    # このページには既に「ウェーブレット分析を実行」ボタンがあるため、
+                    # key="wavelet_comment_button"で明示的に区別しないと
+                    # Streamlitが2つのボタンを同一ウィジェットとして混同してしまう
                     if st.button("AI解説を生成", key="wavelet_comment_button"):
                         comment_cache_key = "wavelet-comment-" + hashlib.sha256(
                             "-".join(
                                 str(part) for part in wavelet_comment_key
                             ).encode("utf-8")
                         ).hexdigest()[:12]
+                        # read_cache/write_cacheはst.session_stateと違い、ディスク上の
+                        # ファイルに保存する独自キャッシュ。ユーザーのセッションが切れた後や
+                        # 別ユーザーが同じ組み合わせを見るときも、LLM呼び出しを再度行わずに済む
                         cached_comment = (
                             None
                             if wavelet_comment_force_regenerate
@@ -221,6 +253,9 @@ def render_wavelet_analysis(
                             write_cache(
                                 CACHE_DIR, comment_cache_key, wavelet_comment_text
                             )
+                        # ボタン押下後の次のrerunでもコメントを表示し続けられるよう
+                        # st.session_stateに保存する。生成時のキーも一緒に保持しておき、
+                        # 下で選択中のペア・周期帯と一致する場合だけ表示する
                         st.session_state["wavelet_comment"] = {
                             "key": wavelet_comment_key,
                             "text": wavelet_comment_text,

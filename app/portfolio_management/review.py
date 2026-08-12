@@ -1,6 +1,8 @@
 """保有ポートフォリオの構成・リスク・個別銘柄情報（ファンダメンタルズ、
 テクニカル、ニュースセンチメント）を集約し、LLMによる統合レビュー
-レポートを生成するモジュール。"""
+レポートを生成するモジュール。portfolio_tab.pyから呼ばれる。
+LLM呼び出しには時間・コストがかかるため、呼び出し側（portfolio_tab.py）で
+common/cache.pyを使い、Streamlitの再実行のたびに呼び直さないようにしている。"""
 
 from common.disclaimer import DISCLAIMER_NOTICE
 from data_api.llm_client import call_llm as default_call_llm
@@ -40,7 +42,9 @@ def generate_portfolio_review(
 ) -> str:
     """ポートフォリオの構成・リスク・銘柄別情報を集約したファクトを
     LLMに渡し、統合レビューレポート（Markdown）を生成する。
-    免責事項を先頭と末尾に必ず付与する。"""
+    免責事項を先頭と末尾に必ず付与する。
+
+    call_llmはテスト時にダミー関数へ差し替えるための引数（デフォルトは本物のLLM呼び出し）。"""
     names_by_ticker = names_by_ticker or {}
     composition = analyze_portfolio_composition(holdings, current_prices)
     # 各保有銘柄の構成情報に銘柄名を補完する。

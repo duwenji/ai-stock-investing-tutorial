@@ -97,6 +97,11 @@ def _run_grid_combinations(
     return grid_results
 
 
+# 以下のcompute_*系関数は「指標の値そのもの」を返すだけで、売買判断（position）は
+# 含まない。run_*_backtest関数から呼ばれる他、strategy_builder側でチャート描画用に
+# 同じ計算を再利用できるよう、指標計算とバックテストロジックを分離している。
+
+
 def compute_ma_crossover_series(
     prices: pd.Series, short_window: int, long_window: int
 ) -> tuple[pd.Series, pd.Series]:
@@ -107,7 +112,9 @@ def compute_ma_crossover_series(
 
 
 def compute_rsi_series(prices: pd.Series, period: int) -> pd.Series:
-    """RSI逆張り戦略のRSI系列を計算する。"""
+    """RSI逆張り戦略のRSI系列を計算する。
+    RS（相対力）＝一定期間の平均上昇幅÷平均下落幅で、RSIはそれを0〜100に
+    正規化した指標。100に近いほど「買われすぎ」、0に近いほど「売られすぎ」を示す。"""
     delta = prices.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -120,7 +127,9 @@ def compute_rsi_series(prices: pd.Series, period: int) -> pd.Series:
 def compute_macd_series(
     prices: pd.Series, fast: int, slow: int, signal: int
 ) -> tuple[pd.Series, pd.Series]:
-    """MACDクロスオーバー戦略のMACD線/シグナル線系列を計算する。"""
+    """MACDクロスオーバー戦略のMACD線/シグナル線系列を計算する。
+    MACD線＝短期EMA−長期EMA（トレンドの勢いの差）、シグナル線はMACD線自体を
+    さらに平滑化した線。MACD線がシグナル線を上抜けたら上昇トレンド入りとみなす。"""
     fast_ema = prices.ewm(span=fast, adjust=False).mean()
     slow_ema = prices.ewm(span=slow, adjust=False).mean()
     macd_line = fast_ema - slow_ema
@@ -131,7 +140,9 @@ def compute_macd_series(
 def compute_bollinger_bands(
     prices: pd.Series, window: int, num_std: float
 ) -> tuple[pd.Series, pd.Series]:
-    """ボリンジャーバンド逆張り戦略の中心線/下バンド系列を計算する。"""
+    """ボリンジャーバンド逆張り戦略の中心線/下バンド系列を計算する。
+    価格の変動幅（標準偏差）をもとに帯を作り、下バンドを割り込むと
+    統計的に「下がりすぎ」とみなして反発を狙うのが逆張り戦略の考え方。"""
     middle_band = prices.rolling(window).mean()
     band_std = prices.rolling(window).std()
     lower_band = middle_band - num_std * band_std
@@ -321,6 +332,11 @@ def generate_backtest_explanation(
     で検証したうえで、Step2でStep1の解説を踏まえた改善提案を生成する。
     Step1が空文字の場合はStep2に進まずエラーメッセージを返す。Step2が
     空文字の場合は改善提案セクションを省略し、Step1の結果のみ返す。
+
+    call_llmを引数で受け取れるようにしている（デフォルトはdata_api.llm_client.call_llm）
+    のは、テスト時に本物のLLM APIを呼ばずダミー関数へ差し替えられるようにするため。
+    backtest_tab.pyの呼び出し側でLLM結果をcommon/cache.pyでキャッシュしており、
+    ここ自体はキャッシュを持たず、呼ぶたびに毎回LLM APIを呼び出す点に注意。
     """
     summary = summarize_grid_stability(grid_results)
     best, worst = summary["best"], summary["worst"]
@@ -387,7 +403,8 @@ def run_universe_backtest_ranking(
     """銘柄ユニバース全体に対し、銘柄ごとに近傍グリッドサーチで最良パラメータを
     探索し、そのリスク調整後リターン（収益率÷最大ドローダウン）でランキングする。
     銘柄ごとの計算はCPUバウンドなベクトル化演算（pandas/numpy）のため、
-    スレッド並列でも一定の高速化が見込める。"""
+    スレッド並列でも一定の高速化が見込める。ranking_tab.pyの一括バックテスト
+    ランキングやstrategy_builder配下のパイプラインから呼ばれる。"""
     fixed_params = fixed_params or {}
     keys = list(param_grid.keys())
     combos = list(product(*(list(param_grid[key]) for key in keys)))
@@ -439,7 +456,12 @@ def build_universe_backtest_cache_key(
     period・transaction_cost_pct・対象ticker集合（順不同を吸収するためソートして
     結合）からハッシュ化する。単一戦略の場合はstrategy_namesを要素数1のリストで
     渡す。ranking_tab.py（単一戦略）とpipeline_functions.py（単一/4戦略）の
-    両方から共有される。"""
+    両方から共有される。
+
+    この関数自体はキャッシュを読み書きしない。戻り値のキーをcommon/cache.pyの
+    read_cache/write_cacheに渡すのは呼び出し元の役割で、条件が同じなら同じキーに
+    なることを利用して、Streamlitの再実行（rerun）のたびに重いグリッドサーチや
+    LLM呼び出しをやり直さずに済むようにしている。"""
     strategy_part = "+".join(strategy_names)
     key_source = f"{strategy_part}-{period}-{transaction_cost_pct}-{'-'.join(sorted(tickers))}"
     if aggregation is not None:

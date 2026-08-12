@@ -65,11 +65,17 @@ def render_qa_tab() -> None:
         "聞く場合は銘柄コードも入力してください。"
     )
 
+    # key=を付けたウィジェットの入力値はst.session_state[key]にも自動保存される。
+    # ここでは戻り値をそのままローカル変数として使うだけだが、他の場所から
+    # st.session_state["qa_ticker"]のように参照することも可能。
     ticker = st.text_input("銘柄コード（任意）", placeholder="7203.T", key="qa_ticker")
     question = st.text_area(
         "質問", placeholder="この銘柄は割安ですか？", key="qa_question"
     )
 
+    # disabled=not question で質問が未入力の間はボタンを押せなくする。
+    # st.buttonはクリックされたrerunでのみTrueを返すため、この式は「ボタンが押されなかった
+    # か、そもそも押せない状態だった」場合に即returnして以降のLLM呼び出しをスキップする。
     if not st.button("質問する", disabled=not question):
         return
 
@@ -81,6 +87,8 @@ def render_qa_tab() -> None:
         note = "個別銘柄について聞く場合は銘柄コードを入力してください。一般的な回答を表示します。"
         category = "general"
 
+    # 分類結果に応じて参照データを出し分けたうえでLLMに1回だけ問い合わせる
+    # （Routingパターン）。LLM呼び出しは毎回時間がかかるためst.spinnerで待機を示す。
     with st.spinner("回答を生成しています..."):
         if category == "fundamental":
             fundamentals = cached_analyze_fundamentals(ticker)
