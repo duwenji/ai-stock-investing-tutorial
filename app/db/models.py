@@ -130,10 +130,12 @@ class TickerNews(Base):
 class AiSession(Base):
     __tablename__ = "ai_sessions"
 
+    # ticker/user_idはあえてFK制約を付けない（監査ログのため、参照先の銘柄マスタ・
+    # ユーザーのライフサイクル（delete_user等）に書き込みが引きずられないようにする）。
     id: Mapped[str] = mapped_column(primary_key=True)
     feature: Mapped[str] = mapped_column(nullable=False)
     ticker: Mapped[str | None] = mapped_column(nullable=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(nullable=True)
     started_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
 
 
