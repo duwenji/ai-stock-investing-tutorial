@@ -2,8 +2,12 @@ import json
 import logging
 
 import pandas as pd
+import pytest
+from sqlalchemy.orm import sessionmaker
 
 from common.cache import write_cache
+from db.engine import create_db_engine, init_db
+from db.models import AiGeneration, AiSession
 from stock_detail.detail import generate_stock_detail
 
 
@@ -21,7 +25,14 @@ def _fake_history():
     )
 
 
-def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
+@pytest.fixture
+def session_factory(tmp_path):
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'ai_log.db'}")
+    init_db(engine)
+    return sessionmaker(bind=engine)
+
+
+def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path, session_factory):
     def fake_call_llm(prompt):
         if "タイトルを日本語に翻訳してください" in prompt:
             return "ニュース1"
@@ -48,6 +59,7 @@ def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
             "industry": "Auto Manufacturers",
             "business_summary": "Test business summary.",
         },
+        session_factory=session_factory,
     )
 
     assert result == {
@@ -80,7 +92,7 @@ def test_generate_stock_detail_builds_payload_from_dependencies(tmp_path):
     }
 
 
-def test_generate_stock_detail_handles_empty_price_history(tmp_path):
+def test_generate_stock_detail_handles_empty_price_history(tmp_path, session_factory):
     result = generate_stock_detail(
         "AAA.T",
         None,
@@ -95,6 +107,7 @@ def test_generate_stock_detail_handles_empty_price_history(tmp_path):
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": None, "industry": None, "business_summary": None
         },
+        session_factory=session_factory,
     )
 
     assert result["price_history"] == {
@@ -110,7 +123,7 @@ def test_generate_stock_detail_handles_empty_price_history(tmp_path):
     assert result["profile"]["profile_comment"] == "事業内容の情報が取得できませんでした。"
 
 
-def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path):
+def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path, session_factory):
     call_count = {"n": 0}
 
     def counting_fetch_price_history(ticker, period):
@@ -131,6 +144,7 @@ def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path):
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
     assert call_count["n"] == 1
 
@@ -147,11 +161,12 @@ def test_generate_stock_detail_uses_cache_and_skips_dependency_calls(tmp_path):
         analyze_fundamentals=fail,
         analyze_technical=fail,
         fetch_company_profile=fail,
+        session_factory=session_factory,
     )
     assert result["comment"] == "初回コメント"
 
 
-def test_generate_stock_detail_ignores_stale_cache_missing_ohlcv(tmp_path):
+def test_generate_stock_detail_ignores_stale_cache_missing_ohlcv(tmp_path, session_factory):
     stale_payload = {
         "ticker": "AAA.T",
         "name": "エーエー株式会社",
@@ -178,13 +193,14 @@ def test_generate_stock_detail_ignores_stale_cache_missing_ohlcv(tmp_path):
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["comment"] == "再生成後のコメント"
     assert result["price_history"]["open"] == [99.0, 100.5, 101.5]
 
 
-def test_generate_stock_detail_ignores_stale_cache_missing_profile(tmp_path):
+def test_generate_stock_detail_ignores_stale_cache_missing_profile(tmp_path, session_factory):
     stale_payload = {
         "ticker": "AAA.T",
         "name": "エーエー株式会社",
@@ -215,13 +231,16 @@ def test_generate_stock_detail_ignores_stale_cache_missing_profile(tmp_path):
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["comment"] == "再生成後のコメント"
     assert "profile" in result
 
 
-def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(tmp_path):
+def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(
+    tmp_path, session_factory
+):
     stale_payload = {
         "ticker": "AAA.T",
         "name": "エーエー株式会社",
@@ -234,7 +253,6 @@ def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(tmp_
             "volume": [1000, 1200, 900],
         },
         "fundamentals": {"per": 1, "pbr": 1, "dividend_yield": 1},
-        # RSI/ADX/ATRの時系列（rsi_series等）を追加する前の旧形式キャッシュ
         "technical": {"ma_short": 1, "ma_long": 1, "signal": "強気"},
         "news": [],
         "comment": "指標時系列が無い旧形式のキャッシュ",
@@ -256,13 +274,16 @@ def test_generate_stock_detail_ignores_stale_cache_missing_technical_series(tmp_
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["comment"] == "再生成後のコメント"
     assert "rsi_series" in result["technical"]
 
 
-def test_generate_stock_detail_translates_news_summaries_and_merges_summary_ja(tmp_path):
+def test_generate_stock_detail_translates_news_summaries_and_merges_summary_ja(
+    tmp_path, session_factory
+):
     def fake_call_llm(prompt):
         if "日本語に翻訳してください" in prompt:
             return "翻訳文1@@@翻訳文2"
@@ -295,13 +316,14 @@ def test_generate_stock_detail_translates_news_summaries_and_merges_summary_ja(t
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["news"][0]["summary_ja"] == "翻訳文1"
     assert result["news"][1]["summary_ja"] == "翻訳文2"
 
 
-def test_generate_stock_detail_translates_news_titles_and_summaries(tmp_path):
+def test_generate_stock_detail_translates_news_titles_and_summaries(tmp_path, session_factory):
     def fake_call_llm(prompt):
         if "タイトルを日本語に翻訳してください" in prompt:
             return "日本語タイトル1@@@日本語タイトル2"
@@ -336,6 +358,7 @@ def test_generate_stock_detail_translates_news_titles_and_summaries(tmp_path):
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["news"][0]["title_ja"] == "日本語タイトル1"
@@ -344,7 +367,9 @@ def test_generate_stock_detail_translates_news_titles_and_summaries(tmp_path):
     assert result["news"][1]["summary_ja"] == "日本語要約2"
 
 
-def test_generate_stock_detail_skips_summary_translation_call_when_no_news_have_summary(tmp_path):
+def test_generate_stock_detail_skips_summary_translation_call_when_no_news_have_summary(
+    tmp_path, session_factory
+):
     def fake_call_llm(prompt):
         if "ニュースタイトル" in prompt:
             return "日本語タイトル"
@@ -368,6 +393,7 @@ def test_generate_stock_detail_skips_summary_translation_call_when_no_news_have_
         fetch_company_profile=lambda ticker: {
             "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
         },
+        session_factory=session_factory,
     )
 
     assert result["news"][0]["title_ja"] == "日本語タイトル"
@@ -375,7 +401,7 @@ def test_generate_stock_detail_skips_summary_translation_call_when_no_news_have_
 
 
 def test_generate_stock_detail_leaves_summary_ja_unset_when_translation_count_mismatches(
-    tmp_path, caplog
+    tmp_path, caplog, session_factory
 ):
     def fake_call_llm(prompt):
         if "日本語に翻訳してください" in prompt:
@@ -412,6 +438,7 @@ def test_generate_stock_detail_leaves_summary_ja_unset_when_translation_count_mi
             fetch_company_profile=lambda ticker: {
                 "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
             },
+            session_factory=session_factory,
         )
 
     assert "summary_ja" not in result["news"][0]
@@ -419,7 +446,7 @@ def test_generate_stock_detail_leaves_summary_ja_unset_when_translation_count_mi
     assert "一致しませんでした" in caplog.text
 
 
-def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog):
+def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog, session_factory):
     with caplog.at_level(logging.INFO, logger="stock_detail.detail"):
         generate_stock_detail(
             "AAA.T",
@@ -433,8 +460,119 @@ def test_generate_stock_detail_logs_duration_on_cache_miss(tmp_path, caplog):
             fetch_company_profile=lambda ticker: {
                 "ticker": ticker, "sector": None, "industry": None, "business_summary": None
             },
+            session_factory=session_factory,
         )
 
     assert "銘柄詳細生成（AAA.T）" in caplog.text
     assert "を開始" in caplog.text
     assert "が完了しました" in caplog.text
+
+
+def test_generate_stock_detail_logs_comment_and_profile_facts_and_ai_output_separately(
+    tmp_path, session_factory
+):
+    def fake_call_llm(prompt):
+        if "市場での立ち位置" in prompt:
+            return "プロフィールのAI見解"
+        return "総合コメントのAI見解"
+
+    generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=fake_call_llm,
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [],
+        analyze_fundamentals=lambda ticker: {"per": 12.0, "pbr": 1.1, "dividend_yield": 2.5},
+        analyze_technical=lambda history: {"ma_short": 101.0, "ma_long": 100.0, "signal": "強気"},
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+        session_factory=session_factory,
+        user_id=7,
+    )
+
+    with session_factory() as session:
+        sessions = session.query(AiSession).all()
+        assert len(sessions) == 1
+        assert sessions[0].feature == "stock_detail"
+        assert sessions[0].ticker == "AAA.T"
+        assert sessions[0].user_id == 7
+
+        generations = session.query(AiGeneration).order_by(AiGeneration.turn_index).all()
+        assert [g.feature for g in generations] == [
+            "stock_detail_comment",
+            "stock_detail_profile",
+        ]
+        assert [g.turn_index for g in generations] == [0, 1]
+        assert generations[0].ai_output == "総合コメントのAI見解"
+        assert json.loads(generations[0].facts)["fundamentals"]["per"] == 12.0
+        assert generations[1].ai_output == "プロフィールのAI見解"
+        assert json.loads(generations[1].facts)["business_summary"] == "C"
+        assert generations[0].session_id == generations[1].session_id == sessions[0].id
+
+
+def test_generate_stock_detail_logs_only_comment_when_no_business_summary(
+    tmp_path, session_factory
+):
+    generate_stock_detail(
+        "AAA.T",
+        None,
+        tmp_path,
+        call_llm=lambda prompt: "総合コメント",
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [],
+        analyze_fundamentals=lambda ticker: {"per": None, "pbr": None, "dividend_yield": None},
+        analyze_technical=lambda history: {"ma_short": None, "ma_long": None, "signal": "データ不足"},
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": None, "industry": None, "business_summary": None
+        },
+        session_factory=session_factory,
+    )
+
+    with session_factory() as session:
+        generations = session.query(AiGeneration).all()
+        assert len(generations) == 1
+        assert generations[0].feature == "stock_detail_comment"
+
+
+def test_generate_stock_detail_does_not_log_on_cache_hit(tmp_path, session_factory):
+    generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=lambda prompt: "初回コメント",
+        fetch_price_history=lambda ticker, period: _fake_history(),
+        fetch_news=lambda ticker: [],
+        analyze_fundamentals=lambda ticker: {"per": 1, "pbr": 1, "dividend_yield": 1},
+        analyze_technical=lambda history: {
+            "ma_short": 1, "ma_long": 1, "signal": "強気", "rsi_series": [1.0]
+        },
+        fetch_company_profile=lambda ticker: {
+            "ticker": ticker, "sector": "A", "industry": "B", "business_summary": "C"
+        },
+        session_factory=session_factory,
+    )
+    with session_factory() as session:
+        first_count = session.query(AiGeneration).count()
+
+    def fail(*args, **kwargs):
+        raise AssertionError("キャッシュヒット時は依存関数が呼ばれてはいけない")
+
+    generate_stock_detail(
+        "AAA.T",
+        "エーエー株式会社",
+        tmp_path,
+        call_llm=fail,
+        fetch_price_history=fail,
+        fetch_news=fail,
+        analyze_fundamentals=fail,
+        analyze_technical=fail,
+        fetch_company_profile=fail,
+        session_factory=session_factory,
+    )
+    with session_factory() as session:
+        second_count = session.query(AiGeneration).count()
+
+    assert first_count == 2
+    assert second_count == 2

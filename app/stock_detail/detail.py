@@ -9,18 +9,21 @@
 
 import json
 import logging
+import uuid
 from pathlib import Path
 
 from analysis_agents.fundamental_agent import (
     analyze_fundamentals as default_analyze_fundamentals,
 )
 from analysis_agents.technical_agent import analyze_technical as default_analyze_technical
+from common.ai_generation_log import log_ai_generation
 from common.cache import read_cache, write_cache
 from common.logging_config import log_duration
 from data_api.llm_client import call_llm as default_call_llm
 from data_api.stock_price_api import fetch_company_profile as default_fetch_company_profile
 from data_api.stock_price_api import fetch_news as default_fetch_news
 from data_api.stock_price_api import fetch_price_history as default_fetch_price_history
+from db.engine import SessionLocal
 from prompt_patterns.stock_detail import (
     build_company_profile_prompt,
     build_news_summary_translation_prompt,
@@ -43,6 +46,8 @@ def generate_stock_detail(
     analyze_fundamentals=default_analyze_fundamentals,
     analyze_technical=default_analyze_technical,
     fetch_company_profile=default_fetch_company_profile,
+    user_id: int | None = None,
+    session_factory=SessionLocal,
 ) -> dict:
     """指定銘柄の詳細情報一式を組み立てる。
 
@@ -138,6 +143,19 @@ def generate_stock_detail(
         # まとめ、LLMに銘柄の講評コメントを生成させる
         prompt = build_stock_detail_prompt(ticker, name, fundamentals, technical, news)
         comment = call_llm(prompt)
+        detail_session_id = uuid.uuid4().hex
+        log_ai_generation(
+            detail_session_id,
+            "stock_detail_comment",
+            facts={"fundamentals": fundamentals, "technical": technical, "news": news},
+            prompt=prompt,
+            ai_output=comment,
+            turn_index=0,
+            ticker=ticker,
+            user_id=user_id,
+            session_feature="stock_detail",
+            session_factory=session_factory,
+        )
 
         # 事業内容の説明が無ければLLMを呼ばず、固定メッセージにする
         business_summary = company_profile.get("business_summary")
@@ -150,6 +168,21 @@ def generate_stock_detail(
                 business_summary,
             )
             profile_comment = call_llm(profile_prompt)
+            log_ai_generation(
+                detail_session_id,
+                "stock_detail_profile",
+                facts={
+                    "sector": company_profile.get("sector"),
+                    "industry": company_profile.get("industry"),
+                    "business_summary": business_summary,
+                },
+                prompt=profile_prompt,
+                ai_output=profile_comment,
+                turn_index=1,
+                ticker=ticker,
+                user_id=user_id,
+                session_factory=session_factory,
+            )
         else:
             profile_comment = _NO_PROFILE_MESSAGE
 
