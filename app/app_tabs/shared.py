@@ -89,7 +89,9 @@ def show_stock_detail_dialog(ticker: str, name: str | None) -> None:
     # st.spinnerはブロックの実行が終わるまで「実行中...」というくるくる回るアイコンを
     # 表示するStreamlit専用のコンテキストマネージャ。時間のかかる処理の待機中に使う。
     with st.spinner("銘柄情報を取得中..."):
-        detail = generate_stock_detail(ticker, name, CACHE_DIR, call_llm=call_llm)
+        detail = generate_stock_detail(
+            ticker, name, CACHE_DIR, call_llm=call_llm, user_id=get_current_user_id()
+        )
 
     st.subheader(f"{ticker} {detail.get('name') or ''}")
 
