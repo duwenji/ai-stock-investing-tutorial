@@ -28,6 +28,8 @@ def test_init_db_creates_all_tables(tmp_path):
         "fundamentals_snapshots",
         "company_profiles",
         "ticker_news",
+        "ai_sessions",
+        "ai_generations",
     } <= table_names
 
 

@@ -125,3 +125,28 @@ class TickerNews(Base):
     link: Mapped[str | None] = mapped_column(nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     fetched_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
+
+
+class AiSession(Base):
+    __tablename__ = "ai_sessions"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    feature: Mapped[str] = mapped_column(nullable=False)
+    ticker: Mapped[str | None] = mapped_column(nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    started_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
+
+
+class AiGeneration(Base):
+    __tablename__ = "ai_generations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_sessions.id"), nullable=False, index=True
+    )
+    turn_index: Mapped[int] = mapped_column(nullable=False, default=0)
+    feature: Mapped[str] = mapped_column(nullable=False)
+    facts: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_output: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=_utcnow)
