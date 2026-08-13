@@ -318,7 +318,20 @@ def _render_pipeline_section() -> None:
 
     trace = st.session_state.get("strategy_pipeline_trace")
     if trace:
-        st.caption(" → ".join(trace))
+        # 「リセット」を含む行はステップが未知の関数、またはリトライしても失敗したことを
+        # 示すため、通常行のキャプションに埋もれて見落とされないようst.warningで
+        # 目立たせつつ、trace全体の順序はそのまま維持する。
+        normal_run = []
+        for line in trace:
+            if "リセット" in line:
+                if normal_run:
+                    st.caption(" → ".join(normal_run))
+                    normal_run = []
+                st.warning(line, icon="⚠️")
+            else:
+                normal_run.append(line)
+        if normal_run:
+            st.caption(" → ".join(normal_run))
 
     result_df = st.session_state.get("strategy_pipeline_result_df")
     if result_df is not None:
