@@ -9,7 +9,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
-from admin import delete_user, list_users, set_admin_status
+from admin import delete_user, list_ai_generations, list_users, set_admin_status
 from data_api.stock_price_api import (
     load_company_profile,
     load_fundamentals_snapshots_for_ticker,
@@ -37,6 +37,8 @@ def render_admin_tab() -> None:
     _render_user_management()
     st.divider()
     _render_market_data_management()
+    st.divider()
+    _render_ai_generation_log()
 
 
 def _render_strategy_management() -> None:
@@ -253,3 +255,27 @@ def _render_market_data_management() -> None:
             )
             st.success("企業プロファイルを保存しました。")
             st.rerun()
+
+
+def _render_ai_generation_log() -> None:
+    st.subheader("AI生成ログ（事実・AI見解）")
+    generations = list_ai_generations()
+    if not generations:
+        st.caption("記録されたAI生成はまだありません。")
+        return
+
+    display_df = pd.DataFrame(
+        [
+            {
+                "セッションID": g["session_id"],
+                "種別": g["feature"],
+                "銘柄": g["ticker"] or "―",
+                "ユーザー": g["username"] or "―",
+                "順番": g["turn_index"],
+                "作成日時": g["created_at"],
+                "AI応答（先頭200文字）": g["ai_output"],
+            }
+            for g in generations
+        ]
+    )
+    st.dataframe(display_df, hide_index=True)
