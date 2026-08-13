@@ -46,13 +46,18 @@
 
 ### `ai_sessions`（セッション単位のメタデータ）
 
-| カラム | 型 | Nullable | 内容 |
-|---|---|---|---|
-| `id` | str (uuid4 hex) PK | No | セッションID。呼び出し元（アプリコード）が生成する |
-| `feature` | str | No | セッション種別（例: `stock_detail`, `strategy_dialogue`） |
-| `ticker` | str | Yes | 銘柄に紐づく場合のみ設定 |
-| `user_id` | int, FK→`users.id` | Yes | セッションを開始したユーザー |
-| `started_at` | datetime | No | 既定値: 作成時のUTC時刻 |
+| カラム         | 型                    | Nullable | 内容                                                         |
+| -------------- | --------------------- | -------- | ------------------------------------------------------------ |
+| `id`         | str (uuid4 hex) PK    | No       | セッションID。呼び出し元（アプリコード）が生成する           |
+| `feature`    | str                   | No       | セッション種別（例:`stock_detail`, `strategy_dialogue`） |
+| `ticker`     | str                   | Yes      | 銘柄に紐づく場合のみ設定                                     |
+| `user_id`    | int                   | Yes      | セッションを開始したユーザー                                 |
+| `started_at` | datetime              | No       | 既定値: 作成時のUTC時刻                                      |
+
+`ticker`/`user_id`はいずれもFK制約を付けない（監査ログのため、`delete_user`等の
+関連データライフサイクルに書き込みが引きずられないようにする。実装時にuser_idへ
+FKを付けるとテストのたびに実在するUserを要求し、かつユーザー削除がFK違反で
+壊れることが判明したため）。
 
 単発生成（総合コメント等）では1呼び出しごとに新規セッションを発行する。対話や
 評価改善ループのような複数回のLLM呼び出しは、同一セッションIDを使い回すことで
@@ -60,16 +65,16 @@
 
 ### `ai_generations`（個々のLLM呼び出し。事実とAI推論を分離して保持）
 
-| カラム | 型 | Nullable | 内容 |
-|---|---|---|---|
-| `id` | int PK (autoincrement) | No | |
-| `session_id` | str, FK→`ai_sessions.id`, index | No | |
-| `turn_index` | int | No | セッション内の呼び出し順（0始まり） |
-| `feature` | str | No | 呼び出し単位の細かい種別（例: `strategy_evaluate`） |
-| `facts` | Text (JSON文字列) | No | プロンプトに与えた**事実情報のスナップショット** |
-| `prompt` | Text | No | LLMへ実際に送信したプロンプト全文 |
-| `ai_output` | Text | No | LLMの生応答（**AIの見解・推論**） |
-| `created_at` | datetime | No | 既定値: 作成時のUTC時刻 |
+| カラム         | 型                                 | Nullable | 内容                                                   |
+| -------------- | ---------------------------------- | -------- | ------------------------------------------------------ |
+| `id`         | int PK (autoincrement)             | No       |                                                        |
+| `session_id` | str, FK→`ai_sessions.id`, index | No       |                                                        |
+| `turn_index` | int                                | No       | セッション内の呼び出し順（0始まり）                    |
+| `feature`    | str                                | No       | 呼び出し単位の細かい種別（例:`strategy_evaluate`）   |
+| `facts`      | Text (JSON文字列)                  | No       | プロンプトに与えた**事実情報のスナップショット** |
+| `prompt`     | Text                               | No       | LLMへ実際に送信したプロンプト全文                      |
+| `ai_output`  | Text                               | No       | LLMの生応答（**AIの見解・推論**）                |
+| `created_at` | datetime                           | No       | 既定値: 作成時のUTC時刻                                |
 
 `ticker`/`user_id`は`ai_sessions`側にのみ持たせ、セッション内の各行での重複を避ける。
 
