@@ -3,10 +3,12 @@
 """
 
 import logging
+import uuid
 
 import pandas as pd
 import streamlit as st
 
+from common.ai_generation_log import log_ai_generation
 from common.disclaimer import DISCLAIMER_NOTICE
 from data_api.llm_client import call_llm
 from data_api.stock_price_api import load_all_company_profiles
@@ -135,6 +137,8 @@ def _render_idea_input_section() -> None:
             {"role": "user", "content": st.session_state["strategy_idea_text"]}
         ]
         st.session_state["strategy_pending_strategy"] = None
+        st.session_state["strategy_ai_session_id"] = uuid.uuid4().hex
+        st.session_state["strategy_ai_turn"] = 0
         st.rerun()
 
 
@@ -196,17 +200,38 @@ def _render_dialogue_section() -> None:
         sector_jp_values = {
             p["sector_jp"] for p in load_all_company_profiles() if p["sector_jp"]
         }
-        prompt = build_dialogue_prompt(history, sectors=sorted(sector_jp_values))
+        sectors = sorted(sector_jp_values)
+        prompt = build_dialogue_prompt(history, sectors=sectors)
         with st.spinner("AIが回答を考えています..."):
             raw = call_llm(prompt)
+        session_id = st.session_state["strategy_ai_session_id"]
+        turn = st.session_state["strategy_ai_turn"]
+        log_ai_generation(
+            session_id,
+            "strategy_dialogue_turn",
+            facts={"history": history, "sectors": sectors},
+            prompt=prompt,
+            ai_output=raw,
+            turn_index=turn,
+            user_id=get_current_user_id(),
+            session_feature="strategy_dialogue",
+        )
+        st.session_state["strategy_ai_turn"] = turn + 1
         parsed = parse_dialogue_response(raw)
         if parsed["kind"] == "strategy":
             # 確定候補が生成された直後に自動評価・改善ループを1回だけ実行する
             # （Evaluator-Optimizerパターン）。結果を人間の最終確認に回す。
             with st.spinner("戦略条件を評価・改善中..."):
-                evaluation_result = run_evaluation_loop(parsed["strategy"], call_llm=call_llm)
+                evaluation_result = run_evaluation_loop(
+                    parsed["strategy"],
+                    call_llm=call_llm,
+                    session_id=session_id,
+                    turn_index_start=st.session_state["strategy_ai_turn"],
+                    user_id=get_current_user_id(),
+                )
             st.session_state["strategy_pending_strategy"] = evaluation_result["strategy"]
             st.session_state["strategy_pending_evaluation"] = evaluation_result
+            st.session_state["strategy_ai_turn"] = evaluation_result["next_turn_index"]
         else:
             history.append({"role": "assistant", "content": parsed["text"]})
             st.session_state["strategy_chat_history"] = history
@@ -329,6 +354,10 @@ def render_strategy_builder_tab() -> None:
         st.session_state["strategy_pending_evaluation"] = None
     if "strategy_confirmed" not in st.session_state:
         st.session_state["strategy_confirmed"] = None
+    if "strategy_ai_session_id" not in st.session_state:
+        st.session_state["strategy_ai_session_id"] = None
+    if "strategy_ai_turn" not in st.session_state:
+        st.session_state["strategy_ai_turn"] = 0
 
     _render_idea_input_section()
     st.divider()
