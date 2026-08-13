@@ -6,7 +6,7 @@ st.buttonのクリック）から結果を受けてDBを更新する側を担当
 """
 
 from db.engine import SessionLocal
-from db.models import Holding, SectorDisplaySetting, Strategy, User
+from db.models import AiGeneration, AiSession, Holding, SectorDisplaySetting, Strategy, User
 
 
 # admin_tab.pyがst.dataframe()に渡す表の元データとして呼ぶ。rerunのたびに
@@ -51,3 +51,35 @@ def delete_user(user_id: int, session_factory=SessionLocal) -> None:
         session.query(SectorDisplaySetting).filter_by(user_id=user_id).delete()
         session.query(User).filter_by(id=user_id).delete()
         session.commit()
+
+
+# admin_tab.pyのAI生成ログ一覧表示から呼ばれる。件数が際限なく増えるテーブルのため、
+# 常にlimitで上限を設けて新しい順に返す。
+def list_ai_generations(limit: int = 200, session_factory=SessionLocal) -> list[dict]:
+    """AI生成ログ（事実・プロンプト・AI応答）を新しい順に返す。ai_outputは
+    表示用に長すぎる場合は先頭200文字に切り詰める。"""
+    with session_factory() as session:
+        rows = (
+            session.query(AiGeneration, AiSession, User)
+            .join(AiSession, AiGeneration.session_id == AiSession.id)
+            .outerjoin(User, AiSession.user_id == User.id)
+            .order_by(AiGeneration.created_at.desc(), AiGeneration.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "session_id": generation.session_id,
+                "feature": generation.feature,
+                "ticker": session_row.ticker,
+                "username": user.username if user else None,
+                "turn_index": generation.turn_index,
+                "created_at": generation.created_at,
+                "ai_output": (
+                    generation.ai_output[:200]
+                    if len(generation.ai_output) > 200
+                    else generation.ai_output
+                ),
+            }
+            for generation, session_row, user in rows
+        ]

@@ -1,9 +1,17 @@
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from admin import delete_user, list_users, set_admin_status
+from admin import delete_user, list_ai_generations, list_users, set_admin_status
 from db.engine import create_db_engine, init_db
-from db.models import CompanyProfile, Holding, SectorDisplaySetting, Strategy, User
+from db.models import (
+    AiGeneration,
+    AiSession,
+    CompanyProfile,
+    Holding,
+    SectorDisplaySetting,
+    Strategy,
+    User,
+)
 
 
 @pytest.fixture
@@ -100,3 +108,78 @@ def test_delete_user_does_not_affect_other_users(session_factory):
     with session_factory() as session:
         assert session.query(User).filter_by(id=user2_id).count() == 1
         assert session.query(Holding).filter_by(user_id=user2_id).count() == 1
+
+
+def test_list_ai_generations_returns_recent_rows_with_joined_fields(session_factory):
+    with session_factory() as session:
+        user = User(username="taro", hashed_password="h")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        user_id = user.id
+
+        session.add(
+            AiSession(id="s1", feature="stock_detail", ticker="AAA.T", user_id=user_id)
+        )
+        session.flush()
+        session.add(
+            AiGeneration(
+                session_id="s1",
+                turn_index=0,
+                feature="stock_detail_comment",
+                facts="{}",
+                prompt="p1",
+                ai_output="a" * 250,
+            )
+        )
+        session.commit()
+
+    rows = list_ai_generations(session_factory=session_factory)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["session_id"] == "s1"
+    assert row["feature"] == "stock_detail_comment"
+    assert row["ticker"] == "AAA.T"
+    assert row["username"] == "taro"
+    assert row["turn_index"] == 0
+    assert len(row["ai_output"]) == 200
+
+
+def test_list_ai_generations_returns_newest_first_and_respects_limit(session_factory):
+    with session_factory() as session:
+        session.add(AiSession(id="s1", feature="stock_detail", ticker="AAA.T"))
+        session.flush()
+        session.add(
+            AiGeneration(
+                session_id="s1", turn_index=0, feature="stock_detail_comment",
+                facts="{}", prompt="p", ai_output="old",
+            )
+        )
+        session.commit()
+        session.add(
+            AiGeneration(
+                session_id="s1", turn_index=1, feature="stock_detail_profile",
+                facts="{}", prompt="p", ai_output="new",
+            )
+        )
+        session.commit()
+
+    rows = list_ai_generations(limit=1, session_factory=session_factory)
+    assert len(rows) == 1
+    assert rows[0]["ai_output"] == "new"
+
+
+def test_list_ai_generations_handles_missing_user(session_factory):
+    with session_factory() as session:
+        session.add(AiSession(id="s1", feature="stock_detail", ticker="AAA.T", user_id=None))
+        session.flush()
+        session.add(
+            AiGeneration(
+                session_id="s1", turn_index=0, feature="stock_detail_comment",
+                facts="{}", prompt="p", ai_output="a",
+            )
+        )
+        session.commit()
+
+    rows = list_ai_generations(session_factory=session_factory)
+    assert rows[0]["username"] is None
